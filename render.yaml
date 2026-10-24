@@ -1,0 +1,47 @@
+# One web service + one Postgres. Deploy with: Render dashboard > New > Blueprint > pick this repo.
+# The web service must be an always-on paid instance: free instances sleep, and a sleeping
+# service cannot run the in-process follow-up scheduler or receive webhooks reliably.
+services:
+  - type: web
+    name: meganet-lead-sentinel
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # ONE worker on purpose: the scheduler runs inside the process. More workers = duplicate follow-ups.
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 60
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DATABASE_URL
+        fromDatabase:
+          name: meganet-sentinel-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      # Secrets below are entered once in the Render dashboard (sync: false = not stored in this file).
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: OWNER_WHATSAPP_NUMBER
+        sync: false
+      - key: DISPLAY_TZ
+        value: Africa/Lagos
+      # Optional: set after the extra templates are approved (see README)
+      - key: WHATSAPP_TEMPLATE_ACK
+        sync: false
+      - key: WHATSAPP_TEMPLATE_ESCALATION
+        sync: false
+
+databases:
+  - name: meganet-sentinel-db
+    plan: basic-256mb

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Mega-Net Lead Sentinel{% endblock %}</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#14181f; --mute:#667085; --line:#e4e7ec; --brand:#0b5fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1218; --card:#171b23; --ink:#e8ebf0; --mute:#98a2b3; --line:#262c38; --brand:#5b94ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  header { background:var(--card); border-bottom:1px solid var(--line); }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 16px; }
+  header .wrap { display:flex; align-items:center; gap:16px; height:56px; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  header a { color:var(--ink); text-decoration:none; }
+  main { padding:24px 0 48px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; color:var(--mute); text-transform:uppercase; letter-spacing:.04em; }
+  .table-scroll { overflow-x:auto; }
+  a { color:var(--brand); }
+  .badge { display:inline-block; padding:1px 9px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .s-ready { background:#dcfce7; color:#14532d; border-color:#86efac; }
+  .s-cold { background:#e0f2fe; color:#0c4a6e; border-color:#7dd3fc; }
+  .s-closed_won { background:#ede9fe; color:#4c1d95; border-color:#c4b5fd; }
+  .s-closed_lost { background:#f3f4f6; color:#4b5563; }
+  .s-new, .s-engaged { background:#fef9c3; color:#713f12; border-color:#fde047; }
+  .mute { color:var(--mute); font-size:13px; }
+  .flash { background:#fef9c3; color:#713f12; border-radius:8px; padding:10px 14px; margin-bottom:16px; }
+  button, .btn { font:inherit; padding:7px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card);
+    color:var(--ink); cursor:pointer; text-decoration:none; display:inline-block; }
+  button.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
+  input, textarea, select { font:inherit; width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--bg); color:var(--ink); }
+  label { display:block; margin:12px 0 4px; font-weight:600; font-size:13px; }
+  .msgs { display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:80%; padding:10px 14px; border-radius:12px; border:1px solid var(--line); white-space:pre-wrap; word-wrap:break-word; }
+  .msg.in { align-self:flex-start; background:var(--card); }
+  .msg.out { align-self:flex-end; background:rgba(11,95,255,.10); }
+  .msg.failed { border-color:#f04438; }
+  .meta { font-size:12px; color:var(--mute); margin-top:4px; }
+  .actions form { display:inline; }
+  .filters a { margin-right:10px; }
+  @media (max-width:600px) { .msg { max-width:95%; } }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1><a href="{{ url_for('dashboard.leads') }}">Mega-Net Lead Sentinel</a></h1>
+  {% if session.get('auth') %}
+    <a href="{{ url_for('dashboard.new_inquiry') }}">Log inquiry</a>
+    <form method="post" action="{{ url_for('dashboard.logout') }}" style="margin:0">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Log out</button>
+    </form>
+  {% endif %}
+</div></header>
+<main><div class="wrap">
+  {% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% block body %}{% endblock %}
+</div></main>
+</body>
+</html>

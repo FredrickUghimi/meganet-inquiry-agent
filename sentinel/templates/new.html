@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card" style="max-width:560px">
+  <h2 style="margin-top:0">Log an inquiry</h2>
+  <p class="mute">For inquiries that did not arrive on WhatsApp, such as an email you forward in. If a phone number is given,
+    the lead enters the follow-up sequence.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label for="name">Name</label><input id="name" name="name" value="{{ form.get('name', '') }}">
+    <label for="phone">WhatsApp number</label>
+    <input id="phone" name="phone" placeholder="International format, e.g. 2348012345678" value="{{ form.get('phone', '') }}">
+    <label for="email">Email</label><input id="email" name="email" type="email" value="{{ form.get('email', '') }}">
+    <label for="source">Came in by</label>
+    <select id="source" name="source"><option value="email">Email</option><option value="form">Other / form</option></select>
+    <label for="message">Their message</label>
+    <textarea id="message" name="message" rows="6" required>{{ form.get('message', '') }}</textarea>
+    <p><button class="primary">Log inquiry</button></p>
+  </form>
+</div>
+{% endblock %}

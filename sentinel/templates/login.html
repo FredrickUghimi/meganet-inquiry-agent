@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card" style="max-width:360px;margin:48px auto">
+  <h2 style="margin-top:0">Mega-Net Lead Sentinel</h2>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autofocus required>
+    <p><button class="primary">Sign in</button></p>
+  </form>
+</div>
+{% endblock %}

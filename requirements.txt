@@ -1,0 +1,9 @@
+Flask>=3.0,<4
+Flask-SQLAlchemy>=3.1,<4
+SQLAlchemy>=2.0,<3
+APScheduler>=3.10,<4
+anthropic>=0.40
+requests>=2.31
+psycopg2-binary>=2.9
+gunicorn>=22
+tzdata

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.display_name }} · Mega-Net Lead Sentinel{% endblock %}
+{% block body %}
+<p><a href="{{ url_for('dashboard.leads') }}">← All leads</a></p>
+<div class="card">
+  <h2 style="margin:0 0 4px">{{ lead.display_name }}
+    <span class="badge s-{{ lead.status }}">{{ lead.status.replace('_',' ') }}</span>
+    {% if lead.followup_paused %}<span class="badge">follow-ups paused</span>{% endif %}</h2>
+  {% if lead.summary %}<div>{{ lead.summary }}</div>{% endif %}
+  <p class="mute">
+    {{ lead.phone or 'no phone' }} · {{ lead.email or 'no email' }} · {{ PRODUCT_NAMES[lead.product_interest] }} ·
+    via {{ lead.source }} · created {{ lead.created_at|local }}<br>
+    Last contact {{ lead.last_contact_at|local }} · Next follow-up {{ lead.next_followup_at|local }} ·
+    Stage sent: {{ lead.followup_stage or 'none' }}{% if lead.intent %} · Intent: {{ lead.intent.replace('_',' ') }}{% endif %}
+  </p>
+  <div class="actions">
+    {% macro act(value, label) %}
+      <form method="post" action="{{ url_for('dashboard.lead_action', lead_id=lead.id) }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="{{ value }}"><button>{{ label }}</button>
+      </form>
+    {% endmacro %}
+    {{ act('contacted', 'Mark contacted') }}
+    {{ act('closed_won', 'Closed won') }}
+    {{ act('closed_lost', 'Closed lost') }}
+    {% if lead.followup_paused %}{{ act('resume', 'Resume follow-ups') }}{% else %}{{ act('pause', 'Pause follow-ups') }}{% endif %}
+    {% if lead.status in ('closed_won', 'closed_lost') %}{{ act('reopen', 'Reopen') }}{% endif %}
+  </div>
+</div>
+<div class="card">
+  <h3 style="margin-top:0">Conversation</h3>
+  <div class="msgs">
+  {% for m in lead.messages %}
+    <div class="msg {{ 'in' if m.direction == 'inbound' else 'out' }}{{ ' failed' if m.status == 'failed' }}">
+      {{ m.body }}
+      <div class="meta">{{ m.sent_at|local }} · {{ m.channel }}
+        {%- if m.is_followup %} · follow-up day {{ m.followup_stage }}{% endif %}
+        {%- if m.status == 'failed' %} · NOT DELIVERED: {{ m.error }}{% endif %}</div>
+    </div>
+  {% else %}
+    <p class="mute">No messages.</p>
+  {% endfor %}
+  </div>
+</div>
+{% endblock %}
