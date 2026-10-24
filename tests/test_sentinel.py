@@ -3,7 +3,10 @@ import hmac
 import json
 from datetime import timedelta
 
-from sentinel import service
+from types import SimpleNamespace
+
+from sentinel import ai, service
+from sentinel.knowledge import EHR_CLOUD_KNOWLEDGE, ERP_CLOUD_KNOWLEDGE, PRODUCT_NOTES, VOICE
 from sentinel.models import Lead, Message, db, utcnow
 
 
@@ -152,3 +155,67 @@ def test_login_wrong_and_right_password(app):
         s["csrf"] = "tok"
     assert c.post("/login", data={"password": "bad", "csrf": "tok"}).status_code == 200
     assert c.post("/login", data={"password": "pw", "csrf": "tok"}).status_code == 302
+
+
+# --- product knowledge in the reply prompt ---------------------------------------------------
+
+def fake_anthropic(monkeypatch, product="unsure"):
+    """Replace the Anthropic client; record every system prompt. Classification returns `product`."""
+    prompts = []
+
+    def create(**kw):
+        prompts.append(kw["system"])
+        if "tools" in kw:
+            block = SimpleNamespace(type="tool_use", input={"intent": "exploring", "product": product, "summary": "s"})
+        else:
+            block = SimpleNamespace(type="text", text="ok")
+        return SimpleNamespace(content=[block])
+
+    monkeypatch.setattr(ai, "_get_client", lambda: SimpleNamespace(messages=SimpleNamespace(create=create)))
+    return prompts
+
+
+def assert_baseline(system):
+    assert VOICE in system and PRODUCT_NOTES in system
+
+
+def test_ehr_lead_prompt_has_ehr_facts_only(app):
+    system = ai._system(Lead(product_interest="ehr_cloud"), "x")
+    assert_baseline(system)
+    assert EHR_CLOUD_KNOWLEDGE in system and ERP_CLOUD_KNOWLEDGE not in system
+    assert "the EHR Cloud knowledge above" in system and "ERP Cloud knowledge" not in system
+
+
+def test_erp_lead_prompt_has_erp_facts_only(app):
+    system = ai._system(Lead(product_interest="erp_cloud"), "x")
+    assert_baseline(system)
+    assert ERP_CLOUD_KNOWLEDGE in system and EHR_CLOUD_KNOWLEDGE not in system
+    assert "the ERP Cloud knowledge above" in system and "EHR Cloud knowledge" not in system
+
+
+def test_unsure_or_undetermined_lead_prompt_has_neither(app):
+    for interest in ("unsure", None, "something_else"):
+        system = ai._system(Lead(product_interest=interest), "x")
+        assert_baseline(system)
+        assert EHR_CLOUD_KNOWLEDGE not in system and ERP_CLOUD_KNOWLEDGE not in system
+        assert "from the voice guide and product notes above" in system
+
+
+def test_every_draft_path_uses_the_leads_product(app, monkeypatch):
+    prompts = fake_anthropic(monkeypatch)
+    lead = Lead(product_interest="erp_cloud")
+    ai.classify(lead, [])
+    ai.draft_reply(lead, [], "continue")
+    ai.draft_followup_line(lead, [], 3, [])
+    assert len(prompts) == 3
+    assert all(ERP_CLOUD_KNOWLEDGE in p and EHR_CLOUD_KNOWLEDGE not in p for p in prompts)
+
+
+def test_lead_picks_up_detailed_facts_once_product_is_known(app, sent, monkeypatch):
+    prompts = fake_anthropic(monkeypatch, product="ehr_cloud")
+    inbound(app, text="Hi, can we talk?")
+    lead = Lead.query.one()
+    assert lead.product_interest == "ehr_cloud"
+    # classify() ran while the lead was still "unsure"; the reply drafted after it already uses EHR facts
+    assert EHR_CLOUD_KNOWLEDGE not in prompts[0]
+    assert EHR_CLOUD_KNOWLEDGE in prompts[1] and ERP_CLOUD_KNOWLEDGE not in prompts[1]
