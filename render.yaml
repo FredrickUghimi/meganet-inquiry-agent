@@ -36,11 +36,11 @@ services:
         sync: false
       - key: DISPLAY_TZ
         value: Africa/Lagos
-      # Optional: set after the extra templates are approved (see README)
+      # On by default (names must match the approved templates; see README)
       - key: WHATSAPP_TEMPLATE_ACK
-        sync: false
+        value: meganet_inquiry_ack
       - key: WHATSAPP_TEMPLATE_ESCALATION
-        sync: false
+        value: meganet_lead_alert
 
 databases:
   - name: meganet-sentinel-db

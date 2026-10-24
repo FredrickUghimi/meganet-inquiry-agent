@@ -1,7 +1,7 @@
 """Submit the Lead Sentinel message templates to Meta for approval.
 
-    python scripts/submit_templates.py            # the 3 follow-up templates (Day 1/3/7)
-    python scripts/submit_templates.py --all      # also the optional ack + owner-alert templates
+    python scripts/submit_templates.py --all      # all 5: Day 1/3/7 + first-message ack + owner alert (recommended)
+    python scripts/submit_templates.py            # only the 3 follow-up templates (Day 1/3/7)
     python scripts/submit_templates.py --dry-run  # print what would be sent
 
 Needs WHATSAPP_TOKEN and WHATSAPP_BUSINESS_ACCOUNT_ID (the WABA id, not the phone number id).

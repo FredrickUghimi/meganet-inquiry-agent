@@ -58,6 +58,40 @@ def test_ready_lead_alerts_owner_and_stops_sequence(app, sent, claude):
     assert len(alert) == 1 and "https://sentinel.test/leads/1" in alert[0][2] and "pricing" in alert[0][2]
 
 
+def test_ready_alert_falls_back_to_escalation_template_when_window_closed(app, sent, claude, monkeypatch):
+    from sentinel import whatsapp
+
+    def closed_window(to, body):
+        raise whatsapp.WhatsAppError("131047 re-engagement")
+    monkeypatch.setattr(whatsapp, "send_text", closed_window)
+    inbound(app)
+    sent.clear()
+    claude.update(intent="ready_demo", summary="Clinic, 12 staff, wants a demo.")
+    inbound(app, text="Can we book a demo?", mid="wamid.in2")
+    db.session.expire_all()
+    assert Lead.query.one().status == "ready"
+    alert = [s for s in sent if s[0] == "template" and s[1] == "2340000000"]
+    assert len(alert) == 1 and alert[0][2] == "meganet_lead_alert"
+    line, url = alert[0][3]
+    assert "ready for a demo" in line and url == "https://sentinel.test/leads/1"
+
+
+def test_ready_alert_without_escalation_template_is_not_sent_when_window_closed(app, sent, claude, monkeypatch):
+    from sentinel import whatsapp
+    app.config["WHATSAPP_TEMPLATE_ESCALATION"] = None  # operator opted out
+
+    def closed_window(to, body):
+        raise whatsapp.WhatsAppError("131047 re-engagement")
+    monkeypatch.setattr(whatsapp, "send_text", closed_window)
+    inbound(app)
+    sent.clear()
+    claude.update(intent="ready_demo")
+    inbound(app, text="Can we book a demo?", mid="wamid.in2")
+    db.session.expire_all()
+    assert Lead.query.one().status == "ready"  # still flagged in the dashboard
+    assert [s for s in sent if s[1] == "2340000000"] == []
+
+
 def test_followup_sequence_day1_3_7_then_cold(app, sent, claude):
     inbound(app)
     sent.clear()
@@ -114,18 +148,34 @@ def test_send_failure_does_not_stop_other_leads(app, sent, claude, monkeypatch):
     assert second.followup_stage == 1 and len(sent) == 1
 
 
-def test_form_lead_does_not_open_whatsapp_window(app, sent, claude):
+def post_form_lead(app):
     client = app.test_client()
     client.post("/login", data={"password": "pw", "csrf": ""})  # no csrf yet: rejected
     with client.session_transaction() as s:
         s["auth"], s["csrf"] = True, "tok"
-    r = client.post("/new", data={"csrf": "tok", "name": "Chidi", "phone": "+234 802 333 3333",
-                                  "email": "c@x.com", "source": "email", "message": "Need ERP info"})
-    assert r.status_code == 302
+    return client.post("/new", data={"csrf": "tok", "name": "Chidi", "phone": "+234 802 333 3333",
+                                     "email": "c@x.com", "source": "email", "message": "Need ERP info"})
+
+
+def test_form_lead_gets_ack_template_first_message(app, sent, claude):
+    assert post_form_lead(app).status_code == 302
     lead = Lead.query.one()
     assert lead.phone == "2348023333333" and lead.source == "email"
-    assert sent == []  # no ack template configured, window closed: nothing sent, nothing crashes
-    assert service.window_open(lead) is False
+    assert service.window_open(lead) is False  # a form lead has never messaged on WhatsApp
+    assert sent == [("template", "2348023333333", "meganet_inquiry_ack", ["Chidi", "EHR Cloud"])]  # claude fixture classifies as EHR
+    assert Message.query.filter_by(lead_id=lead.id, direction="outbound", status="sent").count() == 1
+
+
+def test_form_lead_without_ack_template_sends_nothing(app, sent, claude):
+    app.config["WHATSAPP_TEMPLATE_ACK"] = None  # operator opted out
+    assert post_form_lead(app).status_code == 302
+    assert sent == []  # window closed and no template: nothing sent, nothing crashes
+
+
+def test_template_defaults_match_what_submit_script_submits(app):
+    from sentinel.templates_meta import TEMPLATES
+    for t in TEMPLATES.values():
+        assert app.config[t["env"]] == t["name"]
 
 
 def test_dashboard_requires_login_and_actions(app, sent, claude):

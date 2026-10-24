@@ -58,9 +58,10 @@ def load_config():
         "WHATSAPP_TEMPLATE_DAY1": _env("WHATSAPP_TEMPLATE_DAY1", "meganet_followup_day1"),
         "WHATSAPP_TEMPLATE_DAY3": _env("WHATSAPP_TEMPLATE_DAY3", "meganet_followup_day3"),
         "WHATSAPP_TEMPLATE_DAY7": _env("WHATSAPP_TEMPLATE_DAY7", "meganet_followup_day7"),
-        # Optional extras (see README): first contact for form leads, and owner alerts outside the 24h window
-        "WHATSAPP_TEMPLATE_ACK": _env("WHATSAPP_TEMPLATE_ACK"),
-        "WHATSAPP_TEMPLATE_ESCALATION": _env("WHATSAPP_TEMPLATE_ESCALATION"),
+        # First message for form/email leads, and owner alerts outside the 24h window. On by default;
+        # submit them with `scripts/submit_templates.py --all`. A send fails (and is logged) until Meta approves them.
+        "WHATSAPP_TEMPLATE_ACK": _env("WHATSAPP_TEMPLATE_ACK", "meganet_inquiry_ack"),
+        "WHATSAPP_TEMPLATE_ESCALATION": _env("WHATSAPP_TEMPLATE_ESCALATION", "meganet_lead_alert"),
         # Escalation target (digits only, with country code)
         "OWNER_WHATSAPP_NUMBER": "".join(c for c in (_env("OWNER_WHATSAPP_NUMBER") or "") if c.isdigit()) or None,
         # Scheduler

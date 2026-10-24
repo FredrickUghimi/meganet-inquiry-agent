@@ -27,8 +27,8 @@ Dashboard buttons: **Mark contacted** (logs it, pauses the bot), **Closed won/lo
 ### Things worth knowing
 
 - **The 24-hour rule.** After a lead's last WhatsApp message you have 24 hours to send free-form text. After that, WhatsApp only allows pre-approved **templates**. Day 1/3/7 follow-ups go out as templates. Each template has fixed wording plus a slot, `{{3}}`, that Claude fills with a fresh line each time (it is told what it said before, so it varies). If a lead is somehow still inside the window, the follow-up goes as plain text instead.
-- **Form/email leads and the first message.** Someone who emailed you has never messaged your WhatsApp number, so there is no open window and WhatsApp won't deliver a free-form first message. Without the optional `ack` template (see below) the lead is logged and the Day 1/3/7 templates still go out, but they get no instant reply. With it, they do.
-- **Escalation alerts have the same rule.** Alerts to Fredrick are free-form messages, which only work if Fredrick has messaged the business number within the last 24h. Either send the business number a quick "hi" from your phone now and then, or approve the optional `escalation` template. The app logs loudly when an alert couldn't be delivered, and the lead still shows as **ready** (sorted to the top) in the dashboard.
+- **Form/email leads and the first message.** Someone who emailed you has never messaged your WhatsApp number, so there is no open window and WhatsApp won't deliver a free-form first message. The `ack` template (`meganet_inquiry_ack`, enabled by default) is sent as the instant first message, so they get a reply right away. It only delivers once Meta has approved it (step 8); until then the send fails and is logged, and the Day 1/3/7 templates still follow.
+- **Escalation alerts have the same rule.** Alerts to Fredrick are tried as free-form messages first, which only work if Fredrick has messaged the business number within the last 24h. If that fails, the `escalation` template (`meganet_lead_alert`, enabled by default) is sent instead, once approved. The app logs loudly when an alert couldn't be delivered, and the lead still shows as **ready** (sorted to the top) in the dashboard.
 - **Messages from Fredrick's own number are ignored** by intake, so texting the business number never creates a lead.
 - **Product facts.** Claude may only state what's in `sentinel/knowledge.py`. **Edit that file** with accurate product details before going live. It is told never to quote prices, discounts or dates.
 - **Failures are contained.** A failed WhatsApp send is stored on the message (shown red in the dashboard) and logged. The scheduler carries on with other leads. A failed follow-up is retried after an hour; after 3 failures that lead's sequence is paused. If Claude is down, built-in fallback copy is used, so leads still get a reply.
@@ -59,7 +59,7 @@ Tables are created automatically on startup. There are no migrations. If you cha
 
 1. Push this repo to GitHub.
 2. Render dashboard → **New → Blueprint** → select the repo. Render reads `render.yaml` and creates the web service and a Postgres database.
-3. When prompted, fill the `sync: false` variables (see `.env.example` for what each is): `DASHBOARD_PASSWORD`, `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `OWNER_WHATSAPP_NUMBER`. You can leave the two optional template variables empty for now.
+3. When prompted, fill the `sync: false` variables (see `.env.example` for what each is): `DASHBOARD_PASSWORD`, `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `OWNER_WHATSAPP_NUMBER`. `WHATSAPP_TEMPLATE_ACK` and `WHATSAPP_TEMPLATE_ESCALATION` are prefilled with the default template names; leave them unless you renamed the templates in Meta.
 4. After the first deploy, open `https://<your-service>.onrender.com/healthz` (should say `ok`) and then `/` to log in.
 5. Complete the Meta setup below, using `https://<your-service>.onrender.com/webhook` as the callback URL.
 
@@ -112,7 +112,7 @@ Free-form messages are only allowed in the 24h window, so the Day 1/3/7 follow-u
 
 ```bash
 python scripts/submit_templates.py --dry-run   # look at what will be sent
-python scripts/submit_templates.py             # submit the 3 follow-up templates
+python scripts/submit_templates.py --all       # submit all 5 templates (3 follow-ups + ack + owner alert)
 ```
 
 **Option B: by hand.** WhatsApp Manager → **Message templates → Create template**. Category **Utility**, language **English**, and paste each body exactly, including the `{{1}}`-style variables. Add the sample values when asked.
@@ -129,19 +129,19 @@ Approval usually takes minutes to a day. Status shows in WhatsApp Manager. If yo
 
 **If a template is pending, rejected or paused**, sends for that stage fail. That shows up as a red "NOT DELIVERED" message in the lead's history and in the logs, and the lead is retried hourly, then paused after 3 failures.
 
-### Optional templates
+### First-message and alert templates
 
-Submit these with `python scripts/submit_templates.py --all` (or by hand from `sentinel/templates_meta.py`), then set the env var to the approved name.
+Both are **on by default** and submitted by `--all` above (or by hand from `sentinel/templates_meta.py`). Their env vars only need changing if you use different names in Meta.
 
-- `meganet_inquiry_ack` → `WHATSAPP_TEMPLATE_ACK`. Lets form/email leads get an instant first message on WhatsApp.
-- `meganet_lead_alert` → `WHATSAPP_TEMPLATE_ESCALATION`. Lets alerts reach Fredrick even when his 24h window has lapsed.
+- `meganet_inquiry_ack` → `WHATSAPP_TEMPLATE_ACK`. Instant first message to form/email leads on WhatsApp.
+- `meganet_lead_alert` → `WHATSAPP_TEMPLATE_ESCALATION`. Gets alerts to Fredrick even when his 24h window has lapsed.
 
 ### Moving off the test number (go-live checklist)
 - [ ] Real number added and verified (step 4), display name approved
 - [ ] Permanent system-user token in `WHATSAPP_TOKEN` (step 5)
 - [ ] Webhook verified and subscribed to `messages` (step 6)
-- [ ] Day 1/3/7 templates **Approved** (step 8)
-- [ ] `OWNER_WHATSAPP_NUMBER` set; you've messaged the business number from your phone in the last 24h (or the escalation template is approved)
+- [ ] All 5 templates **Approved** (step 8): Day 1/3/7, `meganet_inquiry_ack`, `meganet_lead_alert`
+- [ ] `OWNER_WHATSAPP_NUMBER` set
 - [ ] `sentinel/knowledge.py` edited with accurate product facts
 - [ ] Business verification started
 
