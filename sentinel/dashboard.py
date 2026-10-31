@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from flask import (Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for)
 
-from . import service
+from . import service, whatsapp
 from .models import Lead, Message, db, utcnow
 from .scheduler import run_async
 
@@ -50,7 +50,8 @@ def local_time(dt):
 
 @bp.app_context_processor
 def inject():
-    return {"csrf_token": csrf_token, "PRODUCT_NAMES": PRODUCT_NAMES}
+    return {"csrf_token": csrf_token, "PRODUCT_NAMES": PRODUCT_NAMES,
+            "whatsapp_connected": whatsapp.is_configured()}
 
 
 @bp.get("/healthz")

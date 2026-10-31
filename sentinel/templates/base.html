@@ -30,6 +30,7 @@
   .s-closed_lost { background:#f3f4f6; color:#4b5563; }
   .s-new, .s-engaged { background:#fef9c3; color:#713f12; border-color:#fde047; }
   .mute { color:var(--mute); font-size:13px; }
+  .banner { background:#fee4e2; color:#7a271a; border:1px solid #fda29b; border-radius:8px; padding:10px 14px; margin-bottom:16px; }
   .flash { background:#fef9c3; color:#713f12; border-radius:8px; padding:10px 14px; margin-bottom:16px; }
   button, .btn { font:inherit; padding:7px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card);
     color:var(--ink); cursor:pointer; text-decoration:none; display:inline-block; }
@@ -59,6 +60,7 @@
   {% endif %}
 </div></header>
 <main><div class="wrap">
+  {% if not whatsapp_connected %}<div class="banner" role="alert"><b>WhatsApp not connected.</b> Leads are saved, but no messages or follow-ups are sent until the WhatsApp variables are set in Render.</div>{% endif %}
   {% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}
   {% block body %}{% endblock %}
 </div></main>

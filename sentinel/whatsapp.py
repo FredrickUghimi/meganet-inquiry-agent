@@ -11,6 +11,12 @@ class WhatsAppError(Exception):
     pass
 
 
+def is_configured():
+    """True when both credentials needed to send are present."""
+    cfg = current_app.config
+    return bool(cfg.get("WHATSAPP_TOKEN") and cfg.get("WHATSAPP_PHONE_NUMBER_ID"))
+
+
 def _post(payload):
     cfg = current_app.config
     token, phone_id = cfg["WHATSAPP_TOKEN"], cfg["WHATSAPP_PHONE_NUMBER_ID"]

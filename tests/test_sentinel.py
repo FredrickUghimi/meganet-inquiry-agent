@@ -269,3 +269,72 @@ def test_lead_picks_up_detailed_facts_once_product_is_known(app, sent, monkeypat
     # classify() ran while the lead was still "unsure"; the reply drafted after it already uses EHR facts
     assert EHR_CLOUD_KNOWLEDGE not in prompts[0]
     assert EHR_CLOUD_KNOWLEDGE in prompts[1] and ERP_CLOUD_KNOWLEDGE not in prompts[1]
+
+
+# --- deployment: blank credentials, /healthz ------------------------------------------------
+
+def _blank_app(tmp_path, **extra):
+    from sentinel import create_app
+    cfg = {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'b.db'}", "SCHEDULER_ENABLED": False,
+           "TESTING": True, "SESSION_COOKIE_SECURE": False, "DASHBOARD_PASSWORD": "pw",
+           "WHATSAPP_TOKEN": None, "WHATSAPP_PHONE_NUMBER_ID": None, "WHATSAPP_APP_SECRET": None,
+           "WHATSAPP_VERIFY_TOKEN": None, "ANTHROPIC_API_KEY": None, "OWNER_WHATSAPP_NUMBER": None}
+    cfg.update(extra)
+    return create_app(cfg)
+
+
+def test_healthz_no_auth_no_db_writes(app):
+    c = app.test_client()
+    r = c.get("/healthz")
+    assert r.status_code == 200 and r.data == b"ok"
+    assert Lead.query.count() == 0 and Message.query.count() == 0
+
+
+def test_blank_credentials_boot_warn_and_banner(tmp_path, caplog):
+    with caplog.at_level("WARNING"):
+        app = _blank_app(tmp_path)
+    assert "WhatsApp not connected" in caplog.text and "ANTHROPIC_API_KEY empty" in caplog.text
+    c = app.test_client()
+    assert c.get("/healthz").status_code == 200
+    with c.session_transaction() as sess:
+        sess["csrf"] = "tok"
+    assert c.post("/login", data={"password": "pw", "csrf": "tok"}).status_code == 302
+    page = c.get("/leads")
+    assert page.status_code == 200 and b"WhatsApp not connected" in page.data
+
+
+def test_blank_credentials_skip_sending_without_crashing(tmp_path, monkeypatch):
+    app = _blank_app(tmp_path)
+    with app.app_context():
+        lead = service.find_or_create_lead(phone="2348022222222", name="Ada", source="form")
+        service.record_inbound(lead, "Interested in EHR", "form")
+        service.handle_lead_reply(lead.id)  # Claude disabled too: must not raise
+        assert Message.query.filter_by(direction="outbound").count() == 0
+        service.run_due_followups()
+        assert service.notify_owner(lead, "x", "a demo") is False
+
+
+def test_banner_hidden_when_connected(app, monkeypatch):
+    monkeypatch.setitem(app.config, "WHATSAPP_TOKEN", "t")
+    monkeypatch.setitem(app.config, "WHATSAPP_PHONE_NUMBER_ID", "1")
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["auth"] = True
+    assert b"WhatsApp not connected" not in c.get("/leads").data
+
+
+def test_verify_works_with_only_verify_token(tmp_path):
+    app = _blank_app(tmp_path, WHATSAPP_VERIFY_TOKEN="tok")
+    c = app.test_client()
+    assert c.get("/webhook?hub.mode=subscribe&hub.verify_token=tok&hub.challenge=7").data == b"7"
+    assert c.get("/webhook?hub.mode=subscribe&hub.verify_token=bad&hub.challenge=7").status_code == 403
+    assert _blank_app(tmp_path).test_client().get(
+        "/webhook?hub.mode=subscribe&hub.verify_token=&hub.challenge=7").status_code == 403
+
+
+def test_database_url_postgres_prefix(monkeypatch):
+    from sentinel.config import database_uri
+    monkeypatch.setenv("DATABASE_URL", "postgres://u:p@h:5432/d")
+    assert database_uri() == "postgresql+psycopg2://u:p@h:5432/d"
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h/d")
+    assert database_uri() == "postgresql+psycopg2://u:p@h/d"

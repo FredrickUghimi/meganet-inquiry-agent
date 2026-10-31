@@ -33,6 +33,7 @@ def app(tmp_path):
         "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 't.db'}",
         "SCHEDULER_ENABLED": False, "TESTING": True, "SESSION_COOKIE_SECURE": False,
         "DASHBOARD_PASSWORD": "pw", "WHATSAPP_VERIFY_TOKEN": "verify", "WHATSAPP_APP_SECRET": "shh",
+        "WHATSAPP_TOKEN": "tok", "WHATSAPP_PHONE_NUMBER_ID": "123",
         "OWNER_WHATSAPP_NUMBER": "2340000000", "PUBLIC_BASE_URL": "https://sentinel.test",
     })
     with app.app_context():

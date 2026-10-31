@@ -8,7 +8,7 @@ services:
     plan: starter
     buildCommand: pip install -r requirements.txt
     # ONE worker on purpose: the scheduler runs inside the process. More workers = duplicate follow-ups.
-    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 60
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 60
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION

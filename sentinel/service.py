@@ -106,6 +106,9 @@ def notify_owner(lead, summary, kind):
     """WhatsApp alert to Fredrick. Failures are logged and never propagate."""
     cfg = current_app.config
     owner = cfg["OWNER_WHATSAPP_NUMBER"]
+    if not whatsapp.is_configured():
+        log.warning("WhatsApp not connected; owner alert for lead %s skipped", lead.id)
+        return False
     if not owner:
         log.warning("OWNER_WHATSAPP_NUMBER not set; cannot alert about lead %s", lead.id)
         return False
@@ -195,6 +198,9 @@ def handle_lead_reply(lead_id):
     else:
         situation = "continue"
 
+    if not whatsapp.is_configured():
+        log.warning("WhatsApp not connected; auto-reply to lead %s skipped", lead_id)
+        return
     if window_open(lead):
         send_whatsapp(lead, text=ai.draft_reply(lead, history, situation))
     elif first_contact and current_app.config["WHATSAPP_TEMPLATE_ACK"]:
@@ -244,6 +250,9 @@ def send_followup(lead):
 
 def run_due_followups():
     """Scheduler tick. One bad lead must never stop the others."""
+    if not whatsapp.is_configured():
+        log.warning("WhatsApp not connected; follow-up tick skipped (leads stay queued)")
+        return
     due = (Lead.query.filter(Lead.status.in_(ACTIVE), Lead.followup_paused.is_(False),
                              Lead.next_followup_at.isnot(None), Lead.next_followup_at <= utcnow()).all())
     for lead_id in [l.id for l in due]:
