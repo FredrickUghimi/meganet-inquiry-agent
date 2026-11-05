@@ -6,7 +6,7 @@ from datetime import timedelta
 from flask import current_app
 from sqlalchemy import func
 
-from . import ai, emailer, templates_meta, whatsapp
+from . import ai, emailer, menu, templates_meta, whatsapp
 from .models import Lead, Message, db, utcnow
 
 log = logging.getLogger(__name__)
@@ -58,13 +58,13 @@ def next_followup_time(lead):
     return (lead.last_inbound_at or lead.created_at) + timedelta(days=nxt)
 
 
-def record_inbound(lead, body, channel, external_id=None, at=None):
+def record_inbound(lead, body, channel, external_id=None, at=None, choice_id=None):
     """Store a message from the lead and restart the follow-up clock. Returns None for duplicates."""
     if external_id and Message.query.filter_by(external_id=external_id).first():
         return None
     at = at or utcnow()
     msg = Message(lead=lead, direction="inbound", channel=channel, body=body, sent_at=at,
-                  external_id=external_id, status="received", handled=False)
+                  external_id=external_id, status="received", handled=False, choice_id=choice_id)
     db.session.add(msg)
     lead.last_contact_at = at
     lead.last_inbound_at = max(at, lead.last_inbound_at or at)
@@ -189,7 +189,7 @@ CLOSED = ("closed_won", "closed_lost")
 
 def is_waiting_state(lead):
     """Fredrick owns this conversation: ready, paused, or marked contacted (which pauses the bot)."""
-    return lead.status not in CLOSED and (lead.status == "ready" or lead.followup_paused)
+    return lead.status not in CLOSED and (lead.status == "ready" or lead.followup_paused or lead.needs_owner)
 
 
 def _waiting_inbound(lead):
@@ -327,6 +327,7 @@ def mark_contacted(lead, note=True):
                                body="Marked as contacted by Fredrick.", handled=True, sender="owner"))
     lead.last_contact_at = now
     lead.followup_paused = True
+    lead.needs_owner = lead.awaiting_choice = False
     if lead.status == "new":
         lead.status = "engaged"
     lead.next_followup_at = None
@@ -505,12 +506,32 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if lead.status in ("closed_won", "closed_lost"):
         return "skipped", f"lead is {lead.status}; no auto-reply (reopen it on the dashboard)"
 
+    if not dry_run and not retry:
+        history = list(lead.messages)
+        choice = _choice_for(lead, pending)
+        if choice:
+            return _handle_choice(lead, choice, history, dry_run, say)
+        if lead.awaiting_choice:  # typed something else instead of choosing: ignore the menu, process as usual
+            lead.awaiting_choice = False
+            db.session.commit()
+
     first_contact = not Message.query.filter(
         Message.lead_id == lead_id, Message.direction == "outbound", Message.status != "failed",
         Message.is_followup.is_(False)).count()
     inbound_count = Message.query.filter_by(lead_id=lead_id, direction="inbound").count()
     history = list(lead.messages)
     say(f"first_contact={first_contact} inbound_count={inbound_count} history={len(history)}")
+
+    if (first_contact and inbound_count == len(pending) and lead.phone and menu_allowed(lead)
+            and whatsapp.is_configured() and window_open(lead)
+            and all(m.choice_id is None and _is_greeting(m.body) for m in pending)):
+        say("first message is a bare greeting: sending the tap menu instead of a draft")
+        if dry_run:
+            return "skipped", "dry run: would send the tap menu"
+        msg = send_menu(lead)
+        if msg.status == "failed":
+            return "failed", f"menu send failed: {msg.error}"
+        return "replied", "menu"
 
     ai_note = None
     ai._local.classify_info = None
@@ -613,6 +634,91 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if msg.status == "failed":
         return "failed", f"WhatsApp send failed: {msg.error}"
     return "replied", situation
+
+
+# --- first-contact tap menu -----------------------------------------------------------------
+
+def _is_greeting(text):
+    verdict = menu.classify_opener(text)
+    if verdict == "unsure":
+        return ai.is_generic_opener(text)
+    return verdict == "yes"
+
+
+def menu_allowed(lead):
+    """Never to ready, paused, contacted or closed leads, and not twice within the cooldown."""
+    if lead.status not in ACTIVE or lead.followup_paused or lead.needs_owner:
+        return False
+    return not (lead.menu_sent_at and utcnow() - lead.menu_sent_at < menu.MENU_COOLDOWN)
+
+
+def send_menu(lead):
+    """Send the reply-button menu; if Meta rejects it, send the numbered text instead. Stores each outbound
+    message with its WhatsApp id. Returns the stored Message (status 'failed' if both sends failed)."""
+    try:
+        external_id, body, via = whatsapp.send_buttons(lead.phone, menu.MENU_BODY, menu.MENU_BUTTONS), menu.MENU_BODY, "buttons"
+        msg = Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body=body, sent_at=utcnow(),
+                      external_id=external_id, status="sent", handled=True)
+        db.session.add(msg)
+        lead.last_contact_at = msg.sent_at
+        db.session.commit()
+    except Exception as exc:
+        log.info("menu lead=%s fallback used: interactive message rejected (%s); sending plain text",
+                 lead.id, type(exc).__name__)
+        msg, via = send_whatsapp(lead, text=menu.MENU_FALLBACK_TEXT), "text"
+    if msg.status != "failed":
+        lead.menu_sent_at, lead.awaiting_choice = msg.sent_at, True
+        db.session.commit()
+        log.info("menu lead=%s sent via=%s", lead.id, via)
+    return msg
+
+
+def _choice_for(lead, pending):
+    """The menu id the lead's latest unanswered message stands for, or None. A tap counts any time (unless
+    Fredrick already owns the lead); typed 1/2/3/EHR/ERP only while the lead is awaiting a choice."""
+    if len(pending) != 1 or is_waiting_state(lead):
+        return None
+    m = pending[0]
+    if m.choice_id in menu.BUTTON_IDS:
+        log.info("menu lead=%s tap received choice=%s", lead.id, m.choice_id)
+        return m.choice_id
+    if lead.awaiting_choice:
+        typed = menu.typed_choice(m.body)
+        if typed:
+            log.info("menu lead=%s typed reply received choice=%s", lead.id, typed)
+            return typed
+    return None
+
+
+def _handle_choice(lead, choice, history, dry_run, say):
+    """Act on a tap (or typed 1/2/3). Returns (outcome, reason)."""
+    if dry_run:
+        return "skipped", f"dry run: would handle menu choice {choice}"
+    lead.awaiting_choice = False
+    if lead.status in ("new", "cold"):
+        lead.status = "engaged"
+    lead.intent = "exploring"
+    if choice == "other":
+        lead.needs_owner = True
+        lead.summary = "Chose Something else on the welcome menu."
+        text = menu.OTHER_REPLY
+    else:
+        lead.product_interest = choice
+        text = None
+    lead.next_followup_at = next_followup_time(lead)
+    db.session.commit()
+    say(f"menu choice={choice} status={lead.status} product={lead.product_interest}")
+    if not whatsapp.is_configured():
+        return "skipped", "WhatsApp not configured (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)"
+    if text is None:
+        ai.reset_draft_info()
+        text = ai.draft_reply(lead, history, "qualify")
+    msg = send_whatsapp(lead, text=text)
+    if choice == "other":
+        send_owner_alert(lead, menu.OTHER_ALERT.format(name=lead.display_name))
+    if msg.status == "failed":
+        return "failed", f"WhatsApp send failed: {msg.error}"
+    return "replied", f"menu choice {choice}"
 
 
 # --- follow-up sequence ---------------------------------------------------------------------

@@ -54,6 +54,33 @@ If Render adds a suffix, use the exact URL shown at the top of the service page.
 5. Tap **Verify and save**, then subscribe to the **messages** field.
 6. Submit the message templates (see README) so follow-ups and first replies can send.
 
+## First-contact menu (new message flow)
+
+When a **new** lead's first WhatsApp message is only a greeting or generic opener (hello, hi, good morning,
+"are you there", "anyone", "I need help"; short, no product name, no real question), the bot does **not** draft a
+reply. It sends one free-form interactive message (inside the 24h window, no template) with three buttons:
+**EHR Cloud**, **ERP Cloud**, **Something else**. A message that names EHR/ERP or asks a real question is handled
+exactly as before. A short greeting-like message the fixed check cannot decide is judged by Claude; if Claude is
+unavailable it is treated as a normal message.
+
+After a tap (or a typed `1`/`2`/`3`, `EHR`, `ERP`):
+
+- **EHR Cloud / ERP Cloud:** the lead's product is set, status becomes engaged, and the usual short qualifying
+  question (size and main problem) is sent, written by Claude with that product's facts.
+- **Something else:** the bot asks them to describe what they need in one message, flags the lead **Needs your
+  reply** (cleared by "Mark contacted", `done <id>` or a dashboard reply), and sends you one WhatsApp alert.
+
+Rules and fallbacks:
+
+- If Meta rejects the interactive message, the bot sends plain text: "Reply 1 for EHR Cloud, 2 for ERP Cloud, 3 for
+  something else." While a lead is awaiting a choice, `1`, `2`, `3`, `EHR` or `ERP` count as a tap. Any other
+  message ignores the menu and is processed normally.
+- The menu is never sent twice to the same lead within 6 hours, and never to ready, paused, contacted or closed leads.
+- The lead page shows a tap as "Chose: <title>". Taps and menu messages are stored like any other message.
+- Logs carry one INFO line per menu sent, tap received and fallback used (`menu lead=...`), never message text.
+- Wording and the 6-hour limit are constants in `sentinel/menu.py`. No new environment variables.
+- The app adds the new database columns by itself on start-up; nothing to run.
+
 ## 5. Render plans
 
 - **Web service: Starter or higher (always on).** Free instances sleep after idle. A sleeping service misses Meta webhooks and its in-process follow-up scheduler stops. The service must also run exactly **one** worker (already set), or follow-ups would be sent twice.

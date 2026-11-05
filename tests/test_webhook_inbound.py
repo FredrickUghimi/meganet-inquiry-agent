@@ -189,7 +189,7 @@ def test_sweeper_answers_stuck_unhandled_message(app, sent, claude):
     from datetime import timedelta
     from sentinel import service
     lead = service.find_or_create_lead(phone=LEAD, name="A")
-    service.record_inbound(lead, "hello", "whatsapp", external_id="w1", at=utcnow() - timedelta(minutes=10))
+    service.record_inbound(lead, "hello, we run a clinic", "whatsapp", external_id="w1", at=utcnow() - timedelta(minutes=10))
     service.run_unanswered()
     assert sent == [("text", LEAD, "reply:first_contact")]
     sent.clear()

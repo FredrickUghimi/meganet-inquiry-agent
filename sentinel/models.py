@@ -35,6 +35,9 @@ class Lead(db.Model):
     reminder_count = db.Column(db.Integer, nullable=False, default=0)  # reminders sent this waiting episode
     last_reminder_at = db.Column(db.DateTime)
     reminder_episode_at = db.Column(db.DateTime)  # which unanswered message the reminder_count belongs to
+    menu_sent_at = db.Column(db.DateTime)  # last first-contact tap menu (6h no-repeat rule)
+    awaiting_choice = db.Column(db.Boolean, nullable=False, default=False)  # menu sent, no choice yet
+    needs_owner = db.Column(db.Boolean, nullable=False, default=False)  # chose "Something else": Fredrick must answer
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",
@@ -60,6 +63,7 @@ class Message(db.Model):
     status = db.Column(db.String(10), nullable=False, default="sent")  # received/sent/failed
     error = db.Column(db.String(500))
     handled = db.Column(db.Boolean, nullable=False, default=True)  # inbound only: auto-reply pass done
+    choice_id = db.Column(db.String(32))  # inbound: id of the button/list row the lead tapped
     sender = db.Column(db.String(8))  # outbound only: "owner" (Fredrick, shown as "You"); null = the bot
 
     lead = db.relationship("Lead", back_populates="messages")

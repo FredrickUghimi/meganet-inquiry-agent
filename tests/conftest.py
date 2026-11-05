@@ -12,6 +12,8 @@ def sent(monkeypatch):
     log = []
     ids = itertools.count(1)
     monkeypatch.setattr(whatsapp, "send_text", lambda to, body: log.append(("text", to, body)) or f"wamid.out{next(ids)}")
+    monkeypatch.setattr(whatsapp, "send_buttons",
+                        lambda to, body, buttons: log.append(("buttons", to, body, [i for i, _ in buttons])) or f"wamid.out{next(ids)}")
     monkeypatch.setattr(whatsapp, "send_template",
                         lambda to, name, lang, params: log.append(("template", to, name, list(params))) or f"wamid.out{next(ids)}")
     return log
