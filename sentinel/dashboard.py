@@ -50,7 +50,7 @@ def local_time(dt):
 
 @bp.app_context_processor
 def inject():
-    return {"csrf_token": csrf_token, "PRODUCT_NAMES": PRODUCT_NAMES,
+    return {"csrf_token": csrf_token, "PRODUCT_NAMES": PRODUCT_NAMES, "wait_label": service.wait_label,
             "whatsapp_connected": whatsapp.is_configured()}
 
 
@@ -90,10 +90,13 @@ def index():
 def leads():
     status = request.args.get("status")
     query = Lead.query
-    if status:
+    if status and status != "needs_reply":
         query = query.filter_by(status=status)
     rows = query.order_by(Lead.last_contact_at.desc().nullslast(), Lead.created_at.desc()).all()
+    if status == "needs_reply":
+        rows = [l for l in rows if service.reply_wait_since(l) is not None]
     rows.sort(key=lambda l: l.status != "ready")  # stable: ready leads float to the top
+    rows.sort(key=lambda l: service.reply_wait_since(l) is None)  # then leads waiting for Fredrick above all
     return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status)
 
 

@@ -23,14 +23,24 @@ def _warn_missing_credentials(app):
         log.warning("DASHBOARD_PASSWORD empty: nobody can log in to the dashboard.")
 
 
+NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters existing tables
+    ("ai_note", "VARCHAR(400)"),
+    ("last_hold_reply_at", "TIMESTAMP"),
+    ("last_owner_alert_at", "TIMESTAMP"),
+    ("reminder_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_reminder_at", "TIMESTAMP"),
+    ("reminder_episode_at", "TIMESTAMP"),
+)
+
+
 def _add_missing_columns():
-    """db.create_all() never alters existing tables; add columns introduced after first deploy."""
     from sqlalchemy import inspect, text
     have = {c["name"] for c in inspect(db.engine).get_columns("leads")}
-    if "ai_note" not in have:
-        db.session.execute(text("ALTER TABLE leads ADD COLUMN ai_note VARCHAR(400)"))
-        db.session.commit()
-        log.info("Added leads.ai_note column")
+    for name, ddl in NEW_COLUMNS:
+        if name not in have:
+            db.session.execute(text(f"ALTER TABLE leads ADD COLUMN {name} {ddl}"))
+            db.session.commit()
+            log.info("Added leads.%s column", name)
 
 
 def create_app(overrides=None):

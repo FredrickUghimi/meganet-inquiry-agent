@@ -66,6 +66,16 @@ def load_config():
         "OWNER_WHATSAPP_NUMBER": "".join(c for c in (_env("OWNER_WHATSAPP_NUMBER") or "") if c.isdigit()) or None,
         # Testing only: treat messages from the owner number as a normal lead instead of ignoring them.
         "OWNER_AS_LEAD": _flag("OWNER_AS_LEAD", False),
+        # Waiting prospects (ready / paused / contacted leads who write again)
+        "HOLD_REPLY_COOLDOWN_HOURS": float(_env("HOLD_REPLY_COOLDOWN_HOURS", "4")),
+        "OWNER_REPLY_REMINDER_MINUTES": float(_env("OWNER_REPLY_REMINDER_MINUTES", "60")),
+        # Optional email copy of every owner alert (all six must be set, else email is off)
+        "SMTP_HOST": _env("SMTP_HOST"),
+        "SMTP_PORT": int(_env("SMTP_PORT", "587")),
+        "SMTP_USER": _env("SMTP_USER"),
+        "SMTP_PASSWORD": _env("SMTP_PASSWORD"),
+        "ALERT_EMAIL_TO": _env("ALERT_EMAIL_TO"),
+        "ALERT_EMAIL_FROM": _env("ALERT_EMAIL_FROM"),
         # Scheduler
         "SCHEDULER_ENABLED": _flag("SCHEDULER_ENABLED", True),
         "FOLLOWUP_CHECK_MINUTES": int(_env("FOLLOWUP_CHECK_MINUTES", "5")),

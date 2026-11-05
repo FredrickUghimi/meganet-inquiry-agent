@@ -40,6 +40,24 @@ services:
       # Testing only: set to 1 to let your own (owner) number create a lead. Leave 0 in normal use.
       - key: OWNER_AS_LEAD
         value: "0"
+      # Waiting prospects: holding-reply cooldown and owner reminder timing
+      - key: HOLD_REPLY_COOLDOWN_HOURS
+        value: "4"
+      - key: OWNER_REPLY_REMINDER_MINUTES
+        value: "60"
+      # Optional email copy of owner alerts: set ALL six or none (blank = email off)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: ALERT_EMAIL_TO
+        sync: false
+      - key: ALERT_EMAIL_FROM
+        sync: false
       - key: DISPLAY_TZ
         value: Africa/Lagos
       # On by default (names must match the approved templates; see README)

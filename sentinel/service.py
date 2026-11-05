@@ -6,7 +6,7 @@ from datetime import timedelta
 from flask import current_app
 from sqlalchemy import func
 
-from . import ai, templates_meta, whatsapp
+from . import ai, emailer, templates_meta, whatsapp
 from .models import Lead, Message, db, utcnow
 
 log = logging.getLogger(__name__)
@@ -112,8 +112,8 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
     return msg
 
 
-def notify_owner(lead, summary, kind):
-    """WhatsApp alert to Fredrick. Failures are logged and never propagate."""
+def _alert_whatsapp(lead, line, url):
+    """WhatsApp alert to Fredrick: plain text if his window is open, else the escalation template."""
     cfg = current_app.config
     owner = cfg["OWNER_WHATSAPP_NUMBER"]
     if not whatsapp.is_configured():
@@ -122,9 +122,6 @@ def notify_owner(lead, summary, kind):
     if not owner:
         log.warning("OWNER_WHATSAPP_NUMBER not set; cannot alert about lead %s", lead.id)
         return False
-    url = f"{cfg['PUBLIC_BASE_URL']}/leads/{lead.id}"
-    line = templates_meta.clean_param(
-        f"{lead.display_name} ({ai.PRODUCT_LABELS[lead.product_interest]}) ready for {kind}. {summary}", 400)
     try:
         whatsapp.send_text(owner, f"{line}\n{url}")
         return True
@@ -133,8 +130,7 @@ def notify_owner(lead, summary, kind):
     tmpl = cfg["WHATSAPP_TEMPLATE_ESCALATION"]
     if tmpl:
         try:
-            whatsapp.send_template(owner, tmpl, cfg["WHATSAPP_TEMPLATE_LANG"],
-                                   [line, url])
+            whatsapp.send_template(owner, tmpl, cfg["WHATSAPP_TEMPLATE_LANG"], [line, url])
             return True
         except Exception:
             log.exception("Owner alert template failed for lead %s", lead.id)
@@ -142,6 +138,156 @@ def notify_owner(lead, summary, kind):
         log.error("Owner alert for lead %s not delivered. Message the business number from your phone to "
                   "reopen the 24h window, or set WHATSAPP_TEMPLATE_ESCALATION.", lead.id)
     return False
+
+
+def send_owner_alert(lead, line):
+    """Alert Fredrick by WhatsApp and, if configured, email. Failures are logged and never propagate.
+    Returns True if any channel delivered; stamps lead.last_owner_alert_at (the throttle) on success."""
+    url = f"{current_app.config['PUBLIC_BASE_URL']}/leads/{lead.id}"
+    line = templates_meta.clean_param(line, 400)
+    delivered = _alert_whatsapp(lead, line, url)
+    mailed = emailer.send_alert(f"Mega-Net lead: {lead.display_name}", f"{line}\n{url}")
+    delivered = bool(delivered or mailed)
+    if delivered:
+        lead.last_owner_alert_at = utcnow()
+        db.session.commit()
+    return delivered
+
+
+def notify_owner(lead, summary, kind):
+    """'Lead is ready' alert."""
+    return send_owner_alert(
+        lead, f"{lead.display_name} ({ai.PRODUCT_LABELS[lead.product_interest]}) ready for {kind}. {summary}")
+
+
+# --- waiting prospects (ready / paused / contacted) -----------------------------------------
+
+OWNER_ALERT_THROTTLE = timedelta(minutes=10)
+REMINDER_REPEAT = timedelta(hours=3)
+MAX_REMINDERS = 3
+CLOSED = ("closed_won", "closed_lost")
+
+
+def is_waiting_state(lead):
+    """Fredrick owns this conversation: ready, paused, or marked contacted (which pauses the bot)."""
+    return lead.status not in CLOSED and (lead.status == "ready" or lead.followup_paused)
+
+
+def reply_wait_since(lead):
+    """When the oldest inbound message still waiting for an answer arrived, or None.
+    Ready/paused/contacted leads are answered only by Fredrick (a stored owner message or Mark contacted);
+    for other leads any successful outbound message, including the bot's, counts as the answer."""
+    if lead.status in CLOSED:
+        return None
+    out = Message.query.filter_by(lead_id=lead.id, direction="outbound")
+    if is_waiting_state(lead):
+        out = out.filter(Message.channel == "manual")
+    else:
+        out = out.filter(Message.status != "failed")
+    marker = out.order_by(Message.sent_at.desc()).first()
+    q = Message.query.filter_by(lead_id=lead.id, direction="inbound")
+    if marker:
+        # WhatsApp timestamps have whole-second precision; do not lose a message sent in the second we replied
+        q = q.filter(Message.sent_at >= marker.sent_at.replace(microsecond=0))
+    first = q.order_by(Message.sent_at.asc()).first()
+    return first.sent_at if first else None
+
+
+def wait_label(lead, now=None):
+    """'2h 5m' style waiting time, or None when nothing is waiting."""
+    since = reply_wait_since(lead)
+    if since is None:
+        return None
+    minutes = max(0, int(((now or utcnow()) - since).total_seconds() // 60))
+    if minutes < 60:
+        return f"{minutes}m"
+    if minutes < 24 * 60:
+        return f"{minutes // 60}h {minutes % 60}m"
+    return f"{minutes // 1440}d {(minutes % 1440) // 60}h"
+
+
+def _quote(lead, limit=80):
+    last = (Message.query.filter_by(lead_id=lead.id, direction="inbound")
+            .order_by(Message.sent_at.desc(), Message.id.desc()).first())
+    text = templates_meta.clean_param(last.body if last else "", limit)
+    return text + ("..." if last and len(templates_meta.clean_param(last.body, 10000)) > limit else "")
+
+
+def holding_text(lead):
+    first = (lead.name or "").strip().split(" ")[0]
+    greeting = f"Thank you, {first}." if first else "Thank you for your message."
+    return f"{greeting} Fredrick has your message and will contact you personally soon."
+
+
+def _waiting_reply(lead, newly_ready, dry_run, say):
+    """A waiting prospect wrote again: holding reply (cooldown) + owner alert (throttle). Returns (outcome, reason)."""
+    cfg, now, notes = current_app.config, utcnow(), []
+    if newly_ready:
+        notes.append("owner already alerted that the lead is ready")
+    elif lead.last_owner_alert_at and now - lead.last_owner_alert_at < OWNER_ALERT_THROTTLE:
+        notes.append("owner alert throttled (alerted <10 min ago)")
+    elif dry_run:
+        notes.append("dry run: would alert the owner")
+    else:
+        sent_alert = send_owner_alert(
+            lead, f'{lead.display_name} wrote while waiting for you: "{_quote(lead)}"')
+        notes.append("owner alerted" if sent_alert else "owner alert FAILED (see logs)")
+    say(f"waiting lead (status={lead.status}, paused={lead.followup_paused}): " + "; ".join(notes))
+
+    cooldown = timedelta(hours=cfg["HOLD_REPLY_COOLDOWN_HOURS"])
+    why = f"lead is {'ready' if lead.status == 'ready' else 'paused/contacted'}; " + "; ".join(notes)
+    if not lead.phone:
+        return "skipped", why + "; no phone for a holding reply"
+    if not whatsapp.is_configured():
+        return "skipped", why + "; WhatsApp not configured"
+    if lead.last_hold_reply_at and now - lead.last_hold_reply_at < cooldown:
+        return "skipped", why + f"; holding reply already sent at {lead.last_hold_reply_at:%H:%M} UTC (cooldown {cooldown})"
+    if not window_open(lead):
+        return "skipped", why + "; 24h window closed, cannot send free-form holding reply"
+    if dry_run:
+        return "skipped", why + "; dry run: would send the holding reply"
+    msg = send_whatsapp(lead, text=holding_text(lead))
+    if msg.status == "failed":
+        return "failed", f"holding reply send failed: {msg.error}"
+    lead.last_hold_reply_at = now
+    db.session.commit()
+    return "holding", why
+
+
+def run_owner_reminders(now=None):
+    """Tick: remind Fredrick about waiting prospects he has not answered (first after OWNER_REPLY_REMINDER_MINUTES,
+    then every 3 hours, at most 3 per unanswered message)."""
+    now = now or utcnow()
+    first_after = timedelta(minutes=current_app.config["OWNER_REPLY_REMINDER_MINUTES"])
+    leads = Lead.query.filter(Lead.status.notin_(CLOSED), db.or_(Lead.status == "ready", Lead.followup_paused.is_(True))).all()
+    for lead_id in [l.id for l in leads]:
+        try:
+            lead = db.session.get(Lead, lead_id)
+            since = reply_wait_since(lead)
+            if since is None:
+                continue
+            if lead.reminder_episode_at != since:
+                lead.reminder_episode_at, lead.reminder_count, lead.last_reminder_at = since, 0, None
+                db.session.commit()
+            if lead.reminder_count >= MAX_REMINDERS:
+                continue
+            due = since + first_after + REMINDER_REPEAT * lead.reminder_count
+            if lead.last_reminder_at:
+                due = max(due, lead.last_reminder_at + REMINDER_REPEAT)
+            if now < due:
+                continue
+            n = lead.reminder_count + 1
+            line = (f'Reminder {n}/{MAX_REMINDERS}: {lead.display_name} has waited {wait_label(lead, now)} for your '
+                    f'reply. Last message: "{_quote(lead)}"')
+            if send_owner_alert(lead, line):
+                lead.reminder_count, lead.last_reminder_at = n, now
+                db.session.commit()
+                log.info("reminder lead=%s outcome=sent n=%s/%s waited=%s", lead.id, n, MAX_REMINDERS, wait_label(lead, now))
+            else:
+                log.warning("reminder lead=%s outcome=failed (owner alert not delivered)", lead.id)
+        except Exception:
+            db.session.rollback()
+            log.exception("Reminder failed for lead %s", lead_id)
 
 
 # --- inbound handling -----------------------------------------------------------------------
@@ -250,6 +396,8 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         new_status = "engaged" if (inbound_count > 1 or lead.status != "new") else "new"
     else:
         new_status = STATUS_FOR_INTENT[intent]
+    if was_ready and new_status in ("new", "engaged"):
+        new_status = "ready"  # a waiting prospect saying "hello?" is still waiting for Fredrick
     if not dry_run:
         if result["product"] != "unsure":
             lead.product_interest = result["product"]
@@ -266,10 +414,10 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if newly_ready and not dry_run:
         notify_owner(lead, result["summary"], "pricing" if intent == "ready_pricing" else "a demo")
 
-    if lead.followup_paused or not lead.phone or (was_ready and new_status == "ready"):
-        reason = ("follow-ups paused for this lead (bot stays quiet)" if lead.followup_paused else
-                  "lead has no phone" if not lead.phone else "lead already ready; Fredrick is handling it")
-        return "skipped", reason
+    if not lead.phone:
+        return "skipped", "lead has no phone"
+    if lead.followup_paused or (was_ready and new_status == "ready"):
+        return _waiting_reply(lead, newly_ready, dry_run, say)
     if first_contact:
         situation = "first_contact"
     elif newly_ready:

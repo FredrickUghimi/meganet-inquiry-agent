@@ -20,6 +20,9 @@ except `DASHBOARD_PASSWORD`.
 | `WHATSAPP_APP_SECRET` | Verifies webhooks really come from Meta | Meta app > App settings > Basic > App secret | Blank until number is live (inbound webhooks are rejected while blank) |
 | `OWNER_WHATSAPP_NUMBER` | Your own WhatsApp for "lead is ready" alerts, digits only with country code, e.g. `2348012345678` | Your number | Blank until number is live |
 | `ANTHROPIC_MODEL` | Claude model used for classification and every drafted message. Default `claude-haiku-5-5`. If you set it in Render's Environment tab it overrides this default, so make sure it is a model your key can use | Preset | `claude-haiku-5-5` |
+| `HOLD_REPLY_COOLDOWN_HOURS` | Hours between automatic "Fredrick has your message" replies to a lead who is ready, paused or marked contacted | Preset | `4` |
+| `OWNER_REPLY_REMINDER_MINUTES` | Minutes before you are reminded about a waiting lead you have not answered (then every 3 hours, max 3) | Preset | `60` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM` | Optional: email a copy of every alert to you. All six must be set, otherwise email is off (silently). Port 587 uses STARTTLS, 465 uses SSL. Gmail needs an app password | Your email provider | Blank |
 | `OWNER_AS_LEAD` | Testing only. Messages from `OWNER_WHATSAPP_NUMBER` are ignored by design (logged as "ignored (sender is OWNER_WHATSAPP_NUMBER...)"). Set to `1` to test the bot from your own phone; set back to `0` afterwards | You | `0` (preset) |
 | `DISPLAY_TZ` | Timezone for dates (preset `Africa/Lagos`) | Preset | Already set |
 | `WHATSAPP_TEMPLATE_ACK`, `WHATSAPP_TEMPLATE_ESCALATION` | Approved template names (preset) | Preset | Already set |
@@ -77,3 +80,9 @@ python scripts/diagnose.py --lead 2 --send   # same, but really sends the reply
 ```
 
 Or open the lead on the dashboard and tap **Retry reply**. Replies run on their own thread, and a safety-net sweep (every follow-up tick) answers any inbound message left unanswered for 2+ minutes.
+
+## Waiting prospects (ready / paused / contacted)
+
+When a lead you are handling writes again, the bot sends one short holding reply ("Thank you, <name>. Fredrick has your message and will contact you personally soon."), at most once per `HOLD_REPLY_COOLDOWN_HOURS`, and alerts you on WhatsApp (and email, if configured) at most once per 10 minutes per lead. If you have not answered after `OWNER_REPLY_REMINDER_MINUTES`, you get up to 3 reminders, 3 hours apart.
+
+The dashboard shows a red **Needs your reply** badge with the waiting time, and the **Needs reply** filter lists those leads. The app cannot see replies you type on your own phone, so **tap Mark contacted on the lead page after you reply**. That clears the flag and stops the reminders.

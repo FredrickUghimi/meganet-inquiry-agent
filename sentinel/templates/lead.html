@@ -5,7 +5,8 @@
 <div class="card">
   <h2 style="margin:0 0 4px">{{ lead.display_name }}
     <span class="badge s-{{ lead.status }}">{{ lead.status.replace('_',' ') }}</span>
-    {% if lead.followup_paused %}<span class="badge">follow-ups paused</span>{% endif %}</h2>
+    {% if lead.followup_paused %}<span class="badge">follow-ups paused</span>{% endif %}
+    {% set w = wait_label(lead) %}{% if w %}<span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span>{% endif %}</h2>
   {% if lead.ai_note %}<div class="flash" style="background:#fee2e2;color:#7f1d1d">⚠ {{ lead.ai_note }}
     If this says classification failed, the lead was treated as "exploring" (keyword checks for price/demo still apply). Fix the cause, then tap Retry reply.</div>{% endif %}
   {% if lead.status == 'ready' and lead.summary %}<div><strong>Ready because:</strong> {{ lead.summary }}</div>

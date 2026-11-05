@@ -163,7 +163,7 @@ def test_existing_lead_new_message_gets_reply_with_start_and_end_logs(app, sent,
     assert "finished outcome=replied reason=continue" in lines[-1]
 
 
-def test_skipped_reply_logs_reason(app, sent, claude, caplog):
+def test_paused_lead_gets_holding_reply_logged(app, sent, claude, caplog):
     post(app, text_value(LEAD, mid="wamid.a"))
     lead = Lead.query.one()
     lead.followup_paused = True
@@ -171,8 +171,8 @@ def test_skipped_reply_logs_reason(app, sent, claude, caplog):
     sent.clear()
     caplog.set_level(logging.INFO)
     post(app, text_value(LEAD, mid="wamid.b"))
-    assert sent == []
-    assert "finished outcome=skipped reason=follow-ups paused" in reply_lines(caplog)[-1]
+    assert "finished outcome=holding reason=lead is paused/contacted" in reply_lines(caplog)[-1]
+    assert any("Fredrick has your message" in x[2] for x in sent)
 
 
 def test_run_async_uses_own_thread_not_scheduler(app, sent, claude):

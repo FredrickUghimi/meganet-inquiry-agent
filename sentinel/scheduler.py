@@ -37,6 +37,7 @@ def start(app):
     def tick():
         with app.app_context():
             service.run_unanswered()
+            service.run_owner_reminders()
             service.run_due_followups()
 
     scheduler = BackgroundScheduler(timezone="UTC")

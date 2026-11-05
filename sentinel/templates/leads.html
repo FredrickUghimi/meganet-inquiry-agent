@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="filters" style="margin-bottom:12px">
+  <a href="{{ url_for('dashboard.leads', status='needs_reply') }}" style="color:#b91c1c">{% if current == 'needs_reply' %}<b>Needs reply</b>{% else %}Needs reply{% endif %}</a>
   <a href="{{ url_for('dashboard.leads') }}">{% if not current %}<b>All</b>{% else %}All{% endif %}</a>
   {% for s in statuses %}<a href="{{ url_for('dashboard.leads', status=s) }}">{% if current == s %}<b>{{ s.replace('_',' ') }}</b>{% else %}{{ s.replace('_',' ') }}{% endif %}</a>{% endfor %}
 </div>
@@ -11,6 +12,7 @@
   {% for l in leads %}
   <tr>
     <td><a href="{{ url_for('dashboard.lead_detail', lead_id=l.id) }}">{{ l.display_name }}</a>
+      {% set w = wait_label(l) %}{% if w %}<div><span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span></div>{% endif %}
       {% if l.summary %}<div class="mute">{{ l.summary }}</div>{% endif %}</td>
     <td>{{ l.phone or '' }}{% if l.phone and l.email %}<br>{% endif %}{{ l.email or '' }}</td>
     <td>{{ PRODUCT_NAMES[l.product_interest] }}</td>
