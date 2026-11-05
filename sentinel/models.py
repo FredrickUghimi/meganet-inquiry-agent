@@ -30,6 +30,7 @@ class Lead(db.Model):
     followup_failures = db.Column(db.Integer, nullable=False, default=0)
     intent = db.Column(db.String(20))  # latest Claude classification
     summary = db.Column(db.String(300))  # latest one-line Claude summary
+    ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",
                                cascade="all, delete-orphan")

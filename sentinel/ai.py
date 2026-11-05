@@ -1,6 +1,8 @@
 """Claude: intent classification and message drafting. Every function has a non-AI fallback
 so a Claude outage never stops a lead from getting a reply."""
+import json
 import logging
+import re
 
 import anthropic
 from flask import current_app
@@ -68,60 +70,79 @@ def _text(response):
 
 # --- classification -------------------------------------------------------------------------
 
-CLASSIFY_TOOL = {
-    "name": "record_classification",
-    "description": "Record the lead's current intent and details.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "intent": {"type": "string", "enum": list(INTENTS),
-                       "description": "exploring: still learning or undecided. ready_demo: asks for or agrees to a "
-                                      "demo/call/meeting. ready_pricing: asks what it costs or for a quote/proposal. "
-                                      "not_fit: clearly not a match or says they are not interested."},
-            "product": {"type": "string", "enum": ["ehr_cloud", "erp_cloud", "unsure"]},
-            "name": {"type": ["string", "null"], "description": "The lead's name if they gave it, else null."},
-            "summary": {"type": "string", "description": "One line, max 140 characters, for the founder: who, "
-                                                         "what they want, size/pain point if known."},
-        },
-        "required": ["intent", "product", "summary"],
-    },
-}
+CLASSIFY_INSTRUCTIONS = (
+    "Classify the lead's readiness based on the whole conversation, weighting their latest messages.\n"
+    "Reply with ONE JSON object and nothing else (no prose, no code fences), exactly this shape:\n"
+    '{"intent": "exploring|ready_demo|ready_pricing|not_fit", '
+    '"product": "ehr_cloud|erp_cloud|unsure", "name": "<lead\'s name or null>", "summary": "<one line>"}\n'
+    "intent: exploring = still learning or undecided; ready_demo = asks for or agrees to a demo/call/meeting; "
+    "ready_pricing = asks what it costs or for a quote/proposal; not_fit = clearly not a match or says they "
+    "are not interested.\n"
+    "product: which product they mean, or unsure.\n"
+    "name: the lead's name if they gave it, else null.\n"
+    "summary: one line, max 140 characters, for the founder: who, what they want, size/pain point if known."
+)
+
+
+class ClassificationParseError(ValueError):
+    pass
+
+
+def parse_classification(text):
+    """Defensively turn the model's text into a validated classification dict.
+    Handles code fences and prose around the JSON; raises ClassificationParseError when no JSON object with
+    an 'intent' is found. Invalid field values fall back to safe defaults."""
+    text = (text or "").strip()
+    decoder = json.JSONDecoder()
+    data = None
+    for match in re.finditer(r"\{", text):
+        try:
+            obj, _ = decoder.raw_decode(text[match.start():])
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and "intent" in obj:
+            data = obj
+            break
+    if data is None:
+        raise ClassificationParseError("no JSON object with an 'intent' field in the model output")
+    intent = data.get("intent")
+    product = data.get("product")
+    name = data.get("name")
+    summary = data.get("summary")
+    return {
+        "intent": intent if intent in INTENTS else "exploring",
+        "product": product if product in PRODUCT_LABELS else "unsure",
+        "name": name.strip()[:120] if isinstance(name, str) and name.strip() and name.strip().lower() != "null" else None,
+        "summary": summary.strip()[:300] if isinstance(summary, str) else "",
+    }
 
 
 def describe_error(exc):
-    """Error type (plus HTTP status for API errors); never includes keys."""
+    """Exact error type, HTTP status and API message; never includes keys."""
     status = getattr(exc, "status_code", None)
-    return f"{type(exc).__name__}" + (f" http={status}" if status else "")
+    out = type(exc).__name__ + (f" http={status}" if status else "")
+    msg = getattr(exc, "message", None) or (str(exc) if status else "")
+    if msg:
+        out += f": {str(msg)[:300]}"
+    return out
 
 
 def classify(lead, messages):
+    """Plain text request (no tools, no tool_choice) so it works on any model."""
+    model = current_app.config["ANTHROPIC_MODEL"]
     try:
-        return _classify(lead, messages)
+        response = _get_client().messages.create(
+            model=model,
+            max_tokens=400,
+            system=_system(lead, CLASSIFY_INSTRUCTIONS),
+            messages=[{"role": "user", "content": f"Conversation:\n{_transcript(messages)}"}],
+        )
+        data = parse_classification(_text(response))
     except Exception as exc:
-        log.warning("claude classify failed: %s", describe_error(exc))
+        log.error("claude classify FAILED (model=%s): %s", model, describe_error(exc))
         raise
-
-
-def _classify(lead, messages):
-    response = _get_client().messages.create(
-        model=current_app.config["ANTHROPIC_MODEL"],
-        max_tokens=400,
-        system=_system(lead, "Classify the lead's readiness based on the whole conversation, weighting their latest messages."),
-        messages=[{"role": "user", "content": f"Conversation:\n{_transcript(messages)}"}],
-        tools=[CLASSIFY_TOOL],
-        tool_choice={"type": "tool", "name": CLASSIFY_TOOL["name"]},
-    )
-    for block in response.content:
-        if block.type == "tool_use":
-            data = dict(block.input)
-            if data.get("intent") not in INTENTS:
-                data["intent"] = "exploring"
-            if data.get("product") not in PRODUCT_LABELS:
-                data["product"] = "unsure"
-            data["summary"] = (data.get("summary") or "")[:300]
-            log.info("claude classify ok intent=%s product=%s", data["intent"], data["product"])
-            return data
-    raise RuntimeError("Claude returned no classification")
+    log.info("claude classify ok model=%s intent=%s product=%s", model, data["intent"], data["product"])
+    return data
 
 
 # --- reply drafting -------------------------------------------------------------------------

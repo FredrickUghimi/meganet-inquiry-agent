@@ -158,8 +158,10 @@ def handle_lead_reply(lead_id, *, retry=False, dry_run=False, trace=None):
     dry_run=True makes the real Claude calls but writes nothing and sends nothing.
     trace, if given, is called with each decision line (used by scripts/diagnose.py).
     """
-    def say(msg):
-        log.info("reply lead=%s %s", lead_id, msg)
+    def say(msg, detail=False):
+        """detail=True lines (lead text, drafted reply) go to trace only, never to the logs."""
+        if not detail:
+            log.info("reply lead=%s %s", lead_id, msg)
         if trace:
             trace(msg)
 
@@ -175,6 +177,7 @@ def handle_lead_reply(lead_id, *, retry=False, dry_run=False, trace=None):
 
 
 def _reply_pipeline(lead_id, retry, dry_run, say):
+    model = current_app.config["ANTHROPIC_MODEL"]
     lead = db.session.get(Lead, lead_id)
     if lead is None:
         return "skipped", "lead not found"
@@ -212,12 +215,16 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     history = list(lead.messages)
     say(f"first_contact={first_contact} inbound_count={inbound_count} history={len(history)}")
 
+    ai_note = None
     try:
         result = ai.classify(lead, history)
-        say(f"claude classify ok: intent={result['intent']} product={result['product']}")
+        say(f"claude classify ok (model {model}): intent={result['intent']} product={result['product']}")
+        say(f"classification detail: name={result['name']!r} summary={result['summary']!r}", detail=True)
     except Exception as exc:
-        log.exception("Classification failed for lead %s; treating as exploring", lead_id)
-        say(f"claude classify FAILED ({type(exc).__name__}); treating as exploring")
+        err = ai.describe_error(exc)
+        log.error("Classification failed for lead %s (model %s): %s; treating as exploring", lead_id, model, err)
+        say(f"claude classify FAILED (model {model}): {err}; treating as exploring")
+        ai_note = f"Claude classification failed (model {model}): {err}"[:400]
         result = {"intent": "exploring", "product": "unsure", "name": None, "summary": ""}
 
     intent = result["intent"]
@@ -232,7 +239,8 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
             lead.product_interest = result["product"]
         if result.get("name") and not lead.name:
             lead.name = result["name"][:120]
-        lead.intent, lead.summary = intent, result["summary"]
+        lead.intent, lead.summary = intent, (result["summary"] or lead.summary)
+        lead.ai_note = ai_note
         lead.status = new_status
         lead.next_followup_at = next_followup_time(lead)
         db.session.commit()
@@ -265,10 +273,12 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if is_open:
         text = ai.draft_reply(lead, history, situation)
         say(f"draft ready ({len(text)} chars)")
+        say(f"drafted reply text: {text!r}", detail=True)
         if dry_run:
             return "skipped", "dry run: would send free-form text (pass --send to really send)"
         msg = send_whatsapp(lead, text=text)
     elif first_contact and cfg_ack:
+        say("would send the ack template (fixed text, no Claude draft)", detail=True)
         if dry_run:
             return "skipped", "dry run: would send the ack template (pass --send to really send)"
         msg = send_whatsapp(lead, template="ack", params=[lead.name or "there", ai.PRODUCT_LABELS[lead.product_interest]])

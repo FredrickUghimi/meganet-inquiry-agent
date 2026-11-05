@@ -37,7 +37,7 @@ def main():
         owner = cfg.get("OWNER_WHATSAPP_NUMBER")
         print(f"  OWNER_WHATSAPP_NUMBER: {service.mask_phone(owner) if owner else 'MISSING'}")
 
-        print("== Anthropic tiny call ==")
+        print(f"== Anthropic (model in use: {cfg['ANTHROPIC_MODEL']}) tiny call ==")
         try:
             r = ai._get_client().messages.create(model=cfg["ANTHROPIC_MODEL"], max_tokens=5,
                                                  messages=[{"role": "user", "content": "Say ok"}])
@@ -53,8 +53,11 @@ def main():
         print(f"  sender={service.mask_phone(lead.phone)} status={lead.status} paused={lead.followup_paused} "
               f"stage={lead.followup_stage} product={lead.product_interest}")
         for m in lead.messages:
-            print(f"  {m.sent_at:%d %b %H:%M} {m.direction:8} {m.channel:8} status={m.status} handled={m.handled}"
-                  f"{' error=' + m.error if m.error else ''}")
+            print(f"  {m.sent_at:%d %b %H:%M} {m.direction:8} {m.channel:8} status={m.status} handled={m.handled} "
+                  f"followup={m.is_followup} id={'yes' if m.external_id else 'no'}"
+                  f"{' error=' + m.error if m.error else ''}\n      text: {m.body[:200]!r}")
+        if lead.ai_note:
+            print("  AI NOTE:", lead.ai_note)
 
         print(f"== Reply pipeline ({'REAL SEND' if args.send else 'dry run, no send'}) ==")
         outcome, reason = service.handle_lead_reply(lead.id, retry=True, dry_run=not args.send,

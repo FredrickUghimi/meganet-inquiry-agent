@@ -22,6 +22,9 @@ services:
       # Secrets below are entered once in the Render dashboard (sync: false = not stored in this file).
       - key: DASHBOARD_PASSWORD
         sync: false
+      # Model for classification and drafting. Must be a model your key can use; plain-text requests only.
+      - key: ANTHROPIC_MODEL
+        value: claude-haiku-5-5
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: WHATSAPP_TOKEN

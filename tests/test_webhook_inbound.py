@@ -219,3 +219,136 @@ def test_dry_run_sends_and_writes_nothing(app, sent, claude):
     out = service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
     assert out[0] == "skipped" and "dry run" in out[1] and sent == []
     assert any("claude classify ok" in l for l in lines)
+
+
+# --- classification: JSON parsing and the 400 from Anthropic ------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+import anthropic  # noqa: E402
+try:  # newer anthropic releases ship their own httpx2
+    import httpx2 as httpx  # noqa: E402
+except ImportError:
+    import httpx  # noqa: E402
+import pytest  # noqa: E402
+
+from sentinel import ai  # noqa: E402
+
+TOOL_CHOICE_MSG = "tool_choice: type 'tool' and 'any' are not supported for this model"
+
+
+def make_400():
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": TOOL_CHOICE_MSG}}
+    return anthropic.BadRequestError(TOOL_CHOICE_MSG, response=httpx.Response(400, request=req, json=body), body=body)
+
+
+def fake_client(create):
+    return SimpleNamespace(messages=SimpleNamespace(create=create))
+
+
+def text_response(text):
+    return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
+
+
+GOOD = '{"intent": "ready_demo", "product": "ehr_cloud", "name": "Amaka", "summary": "Clinic, 12 staff, wants a demo."}'
+
+
+def test_parse_clean_json():
+    r = ai.parse_classification(GOOD)
+    assert r == {"intent": "ready_demo", "product": "ehr_cloud", "name": "Amaka",
+                 "summary": "Clinic, 12 staff, wants a demo."}
+
+
+def test_parse_json_in_code_fences_and_prose():
+    assert ai.parse_classification(f"```json\n{GOOD}\n```")["intent"] == "ready_demo"
+    assert ai.parse_classification(f"Sure! Here you go:\n{GOOD}\nHope that helps {{x}}")["product"] == "ehr_cloud"
+
+
+def test_parse_invalid_field_values_fall_back_safely():
+    r = ai.parse_classification('{"intent": "buy-now!!", "product": "crm", "name": "null", "summary": 5}')
+    assert r == {"intent": "exploring", "product": "unsure", "name": None, "summary": ""}
+
+
+@pytest.mark.parametrize("junk", ["", "I cannot help with that.", "{not json", '{"product": "ehr_cloud"}', "[1, 2]"])
+def test_parse_junk_raises(junk):
+    with pytest.raises(ai.ClassificationParseError):
+        ai.parse_classification(junk)
+
+
+def test_classify_sends_plain_request_without_tools_or_tool_choice(app, monkeypatch):
+    seen = {}
+
+    def create(**kw):
+        seen.update(kw)
+        return text_response(GOOD)
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
+    out = ai.classify(Lead(product_interest="unsure"), [])
+    assert out["intent"] == "ready_demo"
+    assert "tools" not in seen and "tool_choice" not in seen and "thinking" not in seen
+    assert seen["model"] == app.config["ANTHROPIC_MODEL"]
+
+
+def test_default_model_is_configurable_default(monkeypatch):
+    from sentinel.config import load_config
+    monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+    assert load_config()["ANTHROPIC_MODEL"] == "claude-haiku-5-5"
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-custom")
+    assert load_config()["ANTHROPIC_MODEL"] == "claude-custom"
+
+
+def test_anthropic_400_is_logged_as_error_and_shown_on_lead(app, sent, monkeypatch, caplog):
+    def create(**kw):
+        if "system" in kw and "ONE JSON object" in kw["system"]:
+            raise make_400()
+        return text_response("Thanks, tell me more.")
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
+    post(app, text_value(LEAD))
+    lead = Lead.query.one()
+    # still replied (fallback to "exploring"), but loudly
+    assert sent and sent[0][0] == "text"
+    assert lead.ai_note and "BadRequestError http=400" in lead.ai_note and "tool_choice" in lead.ai_note
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any("BadRequestError http=400" in e and "claude classify FAILED" in e for e in errors)
+    assert "tok" not in caplog.text.replace("tool", "")
+
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["auth"], sess["csrf"] = True, "t"
+    page = c.get(f"/leads/{lead.id}").data.decode()
+    assert "Claude classification failed" in page and "BadRequestError" in page
+
+
+def test_successful_classification_clears_note_and_can_make_lead_ready(app, sent, monkeypatch):
+    calls = {"n": 0}
+
+    def create(**kw):
+        if "ONE JSON object" in kw.get("system", ""):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise make_400()
+            return text_response("```json\n" + GOOD + "\n```")
+        return text_response("Fredrick will call you.")
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
+    post(app, text_value(LEAD, mid="wamid.a"))
+    assert Lead.query.one().ai_note
+    post(app, text_value(LEAD, mid="wamid.b", body="please book a demo"))
+    lead = Lead.query.one()
+    assert lead.ai_note is None and lead.status == "ready" and lead.product_interest == "ehr_cloud"
+    assert any(s[1] == OWNER for s in sent)  # owner escalation alert went out
+
+
+def test_dry_run_trace_shows_classification_and_draft_text(app, sent, monkeypatch):
+    from sentinel import service
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(
+        lambda **kw: text_response(GOOD.replace("ready_demo", "exploring") if "ONE JSON object" in kw["system"]
+                                   else "Hello from Mega-Net")))
+    post(app, text_value(LEAD, mid="wamid.a"))
+    sent.clear()
+    lines = []
+    service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
+    joined = "\n".join(lines)
+    assert "intent=exploring" in joined and "Hello from Mega-Net" in joined and sent == []

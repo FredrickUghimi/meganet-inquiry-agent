@@ -215,8 +215,9 @@ def fake_anthropic(monkeypatch, product="unsure"):
 
     def create(**kw):
         prompts.append(kw["system"])
-        if "tools" in kw:
-            block = SimpleNamespace(type="tool_use", input={"intent": "exploring", "product": product, "summary": "s"})
+        if "ONE JSON object" in kw["system"]:
+            block = SimpleNamespace(type="text", text=json.dumps(
+                {"intent": "exploring", "product": product, "name": None, "summary": "s"}))
         else:
             block = SimpleNamespace(type="text", text="ok")
         return SimpleNamespace(content=[block])

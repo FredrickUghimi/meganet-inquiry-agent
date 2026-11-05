@@ -46,7 +46,7 @@ def load_config():
         "PUBLIC_BASE_URL": (_env("PUBLIC_BASE_URL") or _env("RENDER_EXTERNAL_URL") or "http://localhost:5000").rstrip("/"),
         # Anthropic
         "ANTHROPIC_API_KEY": _env("ANTHROPIC_API_KEY"),
-        "ANTHROPIC_MODEL": _env("ANTHROPIC_MODEL", "claude-sonnet-5-5"),
+        "ANTHROPIC_MODEL": _env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
         # WhatsApp Cloud API
         "WHATSAPP_TOKEN": _env("WHATSAPP_TOKEN"),
         "WHATSAPP_PHONE_NUMBER_ID": _env("WHATSAPP_PHONE_NUMBER_ID"),

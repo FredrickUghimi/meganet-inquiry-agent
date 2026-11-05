@@ -23,6 +23,16 @@ def _warn_missing_credentials(app):
         log.warning("DASHBOARD_PASSWORD empty: nobody can log in to the dashboard.")
 
 
+def _add_missing_columns():
+    """db.create_all() never alters existing tables; add columns introduced after first deploy."""
+    from sqlalchemy import inspect, text
+    have = {c["name"] for c in inspect(db.engine).get_columns("leads")}
+    if "ai_note" not in have:
+        db.session.execute(text("ALTER TABLE leads ADD COLUMN ai_note VARCHAR(400)"))
+        db.session.commit()
+        log.info("Added leads.ai_note column")
+
+
 def create_app(overrides=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = Flask(__name__)
@@ -38,6 +48,7 @@ def create_app(overrides=None):
 
     with app.app_context():
         db.create_all()
+        _add_missing_columns()
 
     if app.config["SCHEDULER_ENABLED"]:
         from . import scheduler
