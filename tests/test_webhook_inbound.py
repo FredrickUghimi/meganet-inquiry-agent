@@ -352,3 +352,138 @@ def test_dry_run_trace_shows_classification_and_draft_text(app, sent, monkeypatc
     service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
     joined = "\n".join(lines)
     assert "intent=exploring" in joined and "Hello from Mega-Net" in joined and sent == []
+
+
+# --- reply quality ------------------------------------------------------------------------------
+
+ANSWER = ("Thanks, Fred. With about 15 staff and 80 patients a day, EHR Cloud replaces the lost paper files with "
+          "one digital registry.")
+
+
+def scripted_client(monkeypatch, drafts, classify_text=None, seen=None):
+    """drafts: list of (text, stop_reason) returned in order for reply drafts."""
+    queue = list(drafts)
+
+    def create(**kw):
+        if seen is not None:
+            seen.append(kw)
+        if "ONE JSON object" in kw["system"]:
+            if classify_text is None:
+                raise make_400()
+            return text_response(classify_text)
+        text, stop = queue.pop(0)
+        r = text_response(text)
+        r.stop_reason = stop
+        r.usage = SimpleNamespace(input_tokens=100, output_tokens=42)
+        return r
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
+    return queue
+
+
+def outbound_texts():
+    return [m.body for m in Message.query.filter_by(direction="outbound").order_by(Message.id)]
+
+
+def test_max_tokens_cut_off_is_retried_and_never_sent_mid_sentence(app, sent, monkeypatch, caplog):
+    cut = "Thanks, Fred. EHR Cloud keeps patient records in one digital registry, so the paper files are replaced. Billing is built around"
+    scripted_client(monkeypatch, [(cut, "max_tokens"), ("Fredrick shares pricing personally. What day suits you for a demo?", "end_turn")],
+                    classify_text=GOOD)
+    post(app, text_value(LEAD))
+    assert sent[-1][2] == "Fredrick shares pricing personally. What day suits you for a demo?"
+    assert any("hit max_tokens" in r.getMessage() for r in caplog.records)
+
+
+def test_max_tokens_twice_trims_to_last_complete_sentence(app, monkeypatch):
+    cut = "Thanks, Fred. EHR Cloud keeps patient records in one digital registry, so the paper files are replaced. Billing is built around"
+    scripted_client(monkeypatch, [(cut, "max_tokens"), (cut, "max_tokens")], classify_text=GOOD)
+    lead = Lead(product_interest="ehr_cloud")
+    text = ai.draft_reply(lead, [], "continue")
+    assert text == "Thanks, Fred. EHR Cloud keeps patient records in one digital registry, so the paper files are replaced."
+    assert ai.last_draft_info()["retried"] is True and not ai.last_draft_info()["fallback"]
+
+
+def test_max_tokens_with_no_complete_sentence_uses_fallback_not_fragment(app, monkeypatch):
+    scripted_client(monkeypatch, [("Billing is built around", "max_tokens")] * 2, classify_text=GOOD)
+    text = ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
+    assert text == ai.FALLBACK_REPLIES["continue"] and ai.last_draft_info()["fallback"]
+
+
+def test_reply_max_tokens_is_generous(app, monkeypatch):
+    seen = []
+    scripted_client(monkeypatch, [("All good here.", "end_turn")], classify_text=GOOD, seen=seen)
+    ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
+    assert seen[-1]["max_tokens"] >= 1000
+
+
+def test_price_and_demo_message_becomes_ready_replies_without_prices_and_alerts_once(app, sent, monkeypatch):
+    drafts = [("Fredrick shares pricing personally once he knows your setup, and a short demo is the best way "
+               "to see it. What day and time suit you?", "end_turn")]
+    # Claude says "exploring" (or fails): the keyword safety net must still catch this
+    scripted_client(monkeypatch, drafts * 3, classify_text=GOOD.replace("ready_demo", "exploring"))
+    post(app, text_value(LEAD, mid="wamid.a", body="About 15 staff and 80 patients a day."))
+    post(app, text_value(LEAD, mid="wamid.b", body="How much does it cost? I'd like a demo."))
+    lead = Lead.query.one()
+    assert lead.status == "ready" and lead.intent == "ready_pricing"
+    assert lead.summary.startswith("Asked about pricing and a demo")
+    reply = outbound_texts()[-1]
+    assert "demo" in reply.lower() and not ai._PRICE_RE.search(reply)
+    alerts = [s for s in sent if s[1] == OWNER]
+    assert len(alerts) == 1
+    post(app, text_value(LEAD, mid="wamid.c", body="Hello? Is anyone there? What price?"))
+    assert len([s for s in sent if s[1] == OWNER]) == 1  # not alerted twice
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["auth"], sess["csrf"] = True, "t"
+    assert b"Ready because:" in c.get(f"/leads/{lead.id}").data
+
+
+def test_reply_that_quotes_a_price_is_replaced_with_safe_text(app, monkeypatch, caplog):
+    scripted_client(monkeypatch, [("It costs ₦500,000 per month. Want a demo?", "end_turn")], classify_text=GOOD)
+    text = ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
+    assert text == ai.FALLBACK_REPLIES["ready"] and "₦" not in text
+    assert any("price or currency" in r.getMessage() for r in caplog.records)
+
+
+def test_history_sent_to_claude_has_earlier_answers_in_order(app, sent, monkeypatch):
+    seen = []
+    scripted_client(monkeypatch, [("Thanks.", "end_turn")] * 3, classify_text=GOOD.replace("ready_demo", "exploring"), seen=seen)
+    post(app, text_value(LEAD, mid="wamid.a", body="Hi, EHR please."))
+    post(app, text_value(LEAD, mid="wamid.b", body="About 15 staff and 80 patients a day. Paper files keep getting lost."))
+    post(app, text_value(LEAD, mid="wamid.c", body="Okay and then?"))
+    draft = [k for k in seen if "ONE JSON object" not in k["system"]][-1]
+    content = draft["messages"][0]["content"]
+    i_first, i_answer = content.index("Lead: Hi, EHR please."), content.index("Lead: About 15 staff")
+    assert i_first < i_answer < content.index("Lead: Okay and then?")
+    assert "Mega-Net: " in content  # our own earlier replies are in the transcript too
+    assert "Never ask for something the lead has already told you" in draft["system"]
+    assert "NEVER quote, estimate" in draft["system"]
+
+
+def test_fallback_path_logs_warning_and_adds_note(app, sent, monkeypatch, caplog):
+    def create(**kw):
+        if "ONE JSON object" in kw["system"]:
+            return text_response(GOOD.replace("ready_demo", "exploring"))
+        raise make_400()
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
+    post(app, text_value(LEAD, mid="wamid.a"))
+    db.session.expire_all()  # the reply job commits from its own session
+    lead = Lead.query.one()
+    assert sent[-1][2] == ai.FALLBACK_REPLIES["first_contact"]
+    assert "canned fallback" in lead.ai_note and "BadRequestError http=400" in lead.ai_note
+    warns = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("draft_reply FAILED" in w and "BadRequestError http=400" in w for w in warns)
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["auth"], sess["csrf"] = True, "t"
+    assert b"canned fallback" in c.get(f"/leads/{lead.id}").data
+
+
+def test_dry_run_trace_includes_stop_reason_and_usage(app, sent, monkeypatch):
+    from sentinel import service
+    scripted_client(monkeypatch, [("Fine.", "end_turn")] * 2, classify_text=GOOD.replace("ready_demo", "exploring"))
+    post(app, text_value(LEAD, mid="wamid.a", body="hello"))
+    lines = []
+    service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
+    assert any("stop_reason=end_turn" in l and "output_tokens" in l for l in lines)

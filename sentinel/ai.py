@@ -3,6 +3,7 @@ so a Claude outage never stops a lead from getting a reply."""
 import json
 import logging
 import re
+import threading
 
 import anthropic
 from flask import current_app
@@ -32,8 +33,8 @@ def _get_client():
 def _transcript(messages, limit=30):
     lines = []
     for m in messages[-limit:]:
-        if m.status == "failed":
-            continue  # never delivered, so the lead never saw it
+        if m.status == "failed" or m.channel == "manual":
+            continue  # never delivered / an internal dashboard note, so the lead never saw it
         lines.append(f"{'Lead' if m.direction == 'inbound' else 'Mega-Net'}: {m.body}")
     return "\n".join(lines) or "(no messages yet)"
 
@@ -117,6 +118,21 @@ def parse_classification(text):
     }
 
 
+_PRICING_WORDS = re.compile(r"\b(price|prices|pricing|cost|costs|how much|quote|quotation|proposal|fee|fees|"
+                            r"subscription|charge|charges|rates?)\b", re.I)
+DEMO_WORDS = re.compile(r"\b(demo|demonstration|show me|walk ?through|meeting|schedule a call|book a call|"
+                         r"call me|a call|presentation|trial)\b", re.I)
+
+
+def heuristic_intent(text):
+    """Keyword safety net for the classifier: 'ready_pricing', 'ready_demo' or None. Pricing wins if both."""
+    if _PRICING_WORDS.search(text or ""):
+        return "ready_pricing"
+    if DEMO_WORDS.search(text or ""):
+        return "ready_demo"
+    return None
+
+
 def describe_error(exc):
     """Exact error type, HTTP status and API message; never includes keys."""
     status = getattr(exc, "status_code", None)
@@ -147,20 +163,35 @@ def classify(lead, messages):
 
 # --- reply drafting -------------------------------------------------------------------------
 
+REPLY_RULES = (
+    "Reply rules:\n"
+    "- Read the WHOLE conversation first. Never ask for something the lead has already told you (staff or "
+    "patient numbers, their problem, their name); use what they said instead.\n"
+    "- Answer the lead's latest question or request FIRST, then ask at most one or two short questions.\n"
+    "- If the lead asks about price, cost or a quote: say Fredrick shares pricing personally once he knows their "
+    "setup, and propose a short demo with him, asking for a preferred day and time. NEVER quote, estimate or hint "
+    "at any price, range or discount, and write no currency amounts.\n"
+    "- If the lead asks for a demo or a call: confirm Fredrick will arrange it personally and ask for a preferred "
+    "day and time.\n"
+    "- Plain text only, no markdown, no signature. About 90 words at most. Finish every sentence; never stop "
+    "mid-sentence."
+)
+
 SITUATIONS = {
     "first_contact": (
         "This is the lead's first contact. Write the reply: confirm you received their message; if it is not "
         "already clear which product they mean, ask whether it is EHR Cloud or ERP Cloud; ask one or two "
-        "qualifying questions (size of the facility or business, and the main problem they want solved). "
-        "At most two questions in total."
+        "qualifying questions (size of the facility or business, and the main problem they want solved), but only "
+        "those they have not already answered. At most two questions in total."
     ),
     "continue": (
-        "Reply to the lead's latest message(s). Answer only from the product notes and product knowledge you were given. Then ask at most one "
-        "question that moves things forward (size, pain point, or whether a demo with Fredrick would help)."
+        "Reply to the lead's latest message(s). Answer only from the product notes and product knowledge you were "
+        "given. Then ask at most one question that moves things forward (a preferred time for a demo with "
+        "Fredrick is usually the best one)."
     ),
     "ready": (
         "The lead is ready to talk pricing or book a demo. Say Fredrick, the founder, will contact them "
-        "personally and soon. Quote no prices. You may ask for one useful detail such as a good time to talk."
+        "personally and soon, and ask for a preferred day and time for a short demo. Quote no prices."
     ),
     "not_fit": "The lead is not a fit or not interested. Close gracefully in one or two sentences. No pitch.",
 }
@@ -170,30 +201,99 @@ FALLBACK_REPLIES = {
                       "asking about, EHR Cloud or ERP Cloud? And roughly how big is your facility or business, "
                       "and what is the main problem you want to fix?"),
     "continue": "Thanks, noted. Can you tell me a bit more about your setup and what you want to fix first?",
-    "ready": "Thanks. Fredrick will contact you personally shortly.",
+    "ready": ("Thanks. Fredrick shares pricing and runs demos personally. What day and time would suit you "
+              "for a short demo?"),
     "not_fit": "Understood, thanks for letting us know. If anything changes, message us any time.",
 }
 
+REPLY_MAX_TOKENS = 1500  # generous: hidden reasoning tokens count toward max_tokens and starved the visible text
+
+_PRICE_RE = re.compile(r"(₦|\$|€|£|\bNGN\b|\bUSD\b|\bnaira\b|\bdollars?\b|\b\d[\d,.]*\s?(?:k|m|million|thousand)\b)",
+                       re.I)
+
+_local = threading.local()
+
+
+def reset_draft_info():
+    _local.info = None
+
+
+def last_draft_info():
+    """Details of the most recent draft_reply on this thread (None if it did not run)."""
+    return getattr(_local, "info", None)
+
+
+def trim_to_sentence(text):
+    """Cut text back to its last complete sentence; None if there is none worth sending."""
+    m = re.match(r"(.*[.!?]['\")\]]*)(?:\s|$)", text.strip(), re.S)
+    return m.group(1).strip() if m and len(m.group(1)) >= 20 else None
+
+
+def _generate(lead, messages, system_extra, max_tokens, user_extra=""):
+    response = _get_client().messages.create(
+        model=current_app.config["ANTHROPIC_MODEL"],
+        max_tokens=max_tokens,
+        system=_system(lead, system_extra),
+        messages=[{"role": "user", "content": _latest_first_note(messages) + user_extra +
+                   f"Conversation so far:\n{_transcript(messages)}"}],
+    )
+    usage = getattr(response, "usage", None)
+    return (_text(response), getattr(response, "stop_reason", None),
+            {"input_tokens": getattr(usage, "input_tokens", None), "output_tokens": getattr(usage, "output_tokens", None)})
+
+
+def _latest_first_note(messages):
+    """Spell out which lead messages still need an answer (everything after our last outbound message)."""
+    pending = []
+    for m in reversed(messages):
+        if m.direction == "outbound" and m.status != "failed" and m.channel != "manual":
+            break
+        if m.direction == "inbound":
+            pending.append(m.body)
+    if not pending:
+        return ""
+    return "The lead's latest message(s), which your reply must answer first:\n" + "\n".join(
+        f"- {b}" for b in reversed(pending)) + "\n\n"
+
 
 def draft_reply(lead, messages, situation):
+    info = {"fallback": False, "error": None, "stop_reason": None, "usage": None, "retried": False}
+    _local.info = info
+    model = current_app.config["ANTHROPIC_MODEL"]
     try:
         who = f"The lead's name is {lead.name}." if lead.name else "The lead's name is unknown."
-        response = _get_client().messages.create(
-            model=current_app.config["ANTHROPIC_MODEL"],
-            max_tokens=500,
-            system=_system(
-                lead, "Write ONE WhatsApp message to send to the lead. Plain text, no markdown, no signature, "
-                "under 70 words. Output only the message itself.\n" + SITUATIONS[situation] + "\n" + who),
-            messages=[{"role": "user", "content": f"Conversation so far:\n{_transcript(messages)}"}],
-        )
-        text = _text(response)
-        if text:
-            log.info("claude draft_reply ok chars=%d", len(text))
-            return text[:1000]
-        log.warning("claude draft_reply returned empty text; using fallback copy")
+        base = ("Write ONE WhatsApp message to send to the lead. Output only the message itself.\n"
+                + REPLY_RULES + "\n" + SITUATIONS[situation] + "\n" + who)
+        text, stop, usage = _generate(lead, messages, base, REPLY_MAX_TOKENS)
+        info.update(stop_reason=stop, usage=usage)
+        if stop == "max_tokens":
+            log.warning("claude draft_reply hit max_tokens (model=%s, usage=%s); retrying once, shorter", model, usage)
+            info["retried"] = True
+            text, stop, usage = _generate(lead, messages, base + "\nYour last attempt was too long. Reply in at "
+                                          "most 50 words.", REPLY_MAX_TOKENS)
+            info.update(stop_reason=stop, usage=usage)
+            if stop == "max_tokens":
+                text = trim_to_sentence(text)
+                if not text:
+                    raise RuntimeError("reply cut off by max_tokens and no complete sentence to keep")
+        if not text:
+            raise RuntimeError("Claude returned empty text")
+        if len(text) > 1000:
+            text = trim_to_sentence(text[:1000]) or ""
+            if not text:
+                raise RuntimeError("reply longer than 1000 characters with no complete sentence")
+        if _PRICE_RE.search(text):
+            log.warning("claude draft_reply contained a price or currency amount; using the safe pricing reply")
+            info.update(fallback=True, error="draft quoted a price (blocked)")
+            return FALLBACK_REPLIES["ready"]
+        log.info("claude draft_reply ok model=%s chars=%d stop_reason=%s usage=%s", model, len(text), stop, usage)
+        return text
     except Exception as exc:
-        log.exception("Claude reply draft failed (%s); using fallback copy", describe_error(exc))
-    return FALLBACK_REPLIES[situation]
+        err = describe_error(exc)
+        log.warning("claude draft_reply FAILED (model=%s): %s; sending canned fallback text", model, err,
+                    exc_info=True)
+        info.update(fallback=True, error=err)
+        return FALLBACK_REPLIES[situation]
 
 
 # --- follow-up copy -------------------------------------------------------------------------
@@ -216,20 +316,20 @@ def draft_followup_line(lead, messages, stage, previous_lines):
     """One sentence that slots into the template's {{3}} variable (or follows a greeting in free-form)."""
     try:
         avoid = "\n".join(f"- {l}" for l in previous_lines) or "(none)"
-        response = _get_client().messages.create(
-            model=current_app.config["ANTHROPIC_MODEL"],
-            max_tokens=200,
-            system=_system(
-                lead, "Write ONE sentence for a follow-up to a lead who went quiet. It is inserted into a fixed "
-                "template that already contains the greeting, the lead's name, the product and a call to reply, "
-                "so do NOT greet, do NOT use their name, do NOT sign off. One line, under 150 characters, no "
-                "line breaks, no emojis. Must differ in wording and angle from earlier follow-ups:\n"
-                f"{avoid}\n{FOLLOWUP_ANGLES[stage]}\nOutput only the sentence."),
-            messages=[{"role": "user", "content": f"Conversation so far:\n{_transcript(messages)}"}],
-        )
-        line = clean_param(_text(response), limit=160)
-        if line:
+        text, stop, usage = _generate(
+            lead, messages,
+            "Write ONE sentence for a follow-up to a lead who went quiet. It is inserted into a fixed "
+            "template that already contains the greeting, the lead's name, the product and a call to reply, "
+            "so do NOT greet, do NOT use their name, do NOT sign off. One line, under 150 characters, no "
+            "line breaks, no emojis. Must differ in wording and angle from earlier follow-ups:\n"
+            f"{avoid}\n{FOLLOWUP_ANGLES[stage]}\nOutput only the sentence.", 600)
+        if stop == "max_tokens":
+            raise RuntimeError("follow-up line cut off by max_tokens")
+        line = clean_param(text, limit=400)
+        if len(line) > 160:
+            line = trim_to_sentence(line[:160]) or ""
+        if line and not _PRICE_RE.search(line):
             return line
-    except Exception:
-        log.exception("Claude follow-up draft failed; using fallback copy")
+    except Exception as exc:
+        log.warning("Claude follow-up draft failed (%s); using fallback copy", describe_error(exc), exc_info=True)
     return FALLBACK_LINES[stage]

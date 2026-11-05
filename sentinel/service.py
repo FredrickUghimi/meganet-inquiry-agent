@@ -227,6 +227,15 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         ai_note = f"Claude classification failed (model {model}): {err}"[:400]
         result = {"intent": "exploring", "product": "unsure", "name": None, "summary": ""}
 
+    latest = " ".join(m.body for m in pending)
+    hint = ai.heuristic_intent(latest)
+    if hint and result["intent"] == "exploring":
+        say(f"keyword safety net: latest message asks about {'pricing' if hint == 'ready_pricing' else 'a demo'}; "
+            f"upgrading intent exploring -> {hint}")
+        reason = "Asked about pricing" if hint == "ready_pricing" else "Asked for a demo"
+        if hint == "ready_pricing" and ai.DEMO_WORDS.search(latest):
+            reason += " and a demo"
+        result = dict(result, intent=hint, summary=f"{reason}. {result['summary']}".strip()[:300])
     intent = result["intent"]
     old_status = lead.status
     was_ready = old_status == "ready"
@@ -271,7 +280,18 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     is_open = window_open(lead)
     say(f"24h window open={is_open}, ack template={'set' if cfg_ack else 'not set'}")
     if is_open:
+        ai.reset_draft_info()
         text = ai.draft_reply(lead, history, situation)
+        info = ai.last_draft_info()
+        if info:
+            say(f"draft stop_reason={info['stop_reason']} usage={info['usage']} retried={info['retried']} "
+                f"fallback={info['fallback']}" + (f" ({info['error']})" if info["fallback"] else ""))
+            if info["fallback"]:
+                log.warning("Lead %s: reply used canned fallback text because Claude failed: %s", lead_id, info["error"])
+            if not dry_run:
+                draft_note = f"Reply used canned fallback text (Claude failed: {info['error']})." if info["fallback"] else None
+                lead.ai_note = " | ".join(n for n in (ai_note, draft_note) if n)[:400] or None
+                db.session.commit()
         say(f"draft ready ({len(text)} chars)")
         say(f"drafted reply text: {text!r}", detail=True)
         if dry_run:

@@ -7,8 +7,9 @@
     <span class="badge s-{{ lead.status }}">{{ lead.status.replace('_',' ') }}</span>
     {% if lead.followup_paused %}<span class="badge">follow-ups paused</span>{% endif %}</h2>
   {% if lead.ai_note %}<div class="flash" style="background:#fee2e2;color:#7f1d1d">⚠ {{ lead.ai_note }}
-    The lead was treated as "exploring"; it cannot become "ready" until this is fixed. Tap Retry reply after fixing.</div>{% endif %}
-  {% if lead.summary %}<div>{{ lead.summary }}</div>{% endif %}
+    If this says classification failed, the lead was treated as "exploring" (keyword checks for price/demo still apply). Fix the cause, then tap Retry reply.</div>{% endif %}
+  {% if lead.status == 'ready' and lead.summary %}<div><strong>Ready because:</strong> {{ lead.summary }}</div>
+  {% elif lead.summary %}<div>{{ lead.summary }}</div>{% endif %}
   <p class="mute">
     {{ lead.phone or 'no phone' }} · {{ lead.email or 'no email' }} · {{ PRODUCT_NAMES[lead.product_interest] }} ·
     via {{ lead.source }} · created {{ lead.created_at|local }}<br>
