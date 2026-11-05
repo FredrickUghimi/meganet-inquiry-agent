@@ -60,5 +60,6 @@ class Message(db.Model):
     status = db.Column(db.String(10), nullable=False, default="sent")  # received/sent/failed
     error = db.Column(db.String(500))
     handled = db.Column(db.Boolean, nullable=False, default=True)  # inbound only: auto-reply pass done
+    sender = db.Column(db.String(8))  # outbound only: "owner" (Fredrick, shown as "You"); null = the bot
 
     lead = db.relationship("Lead", back_populates="messages")

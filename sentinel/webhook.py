@@ -99,6 +99,11 @@ def receive():
                         log.warning("webhook message addressed to phone_number_id=%s but this service is "
                                     "WHATSAPP_PHONE_NUMBER_ID=%s", phone_id, configured_id)
                         _log_event("message", phone, phone_id, "ignored (phone_number_id is not ours)")
+                    elif phone == owner and m.get("type") == "text" and service.is_owner_command(_body_of(m)):
+                        # signature already verified; only the exact owner number can run commands
+                        _log_event("message", phone, phone_id,
+                                   f"owner command {_body_of(m).split()[0].lower().rstrip(':')}")
+                        run_async(current_app._get_current_object(), service.run_owner_command, _body_of(m))
                     elif phone == owner and not cfg.get("OWNER_AS_LEAD"):
                         _log_event("message", phone, phone_id,
                                    "ignored (sender is OWNER_WHATSAPP_NUMBER; set OWNER_AS_LEAD=1 to test)")

@@ -86,3 +86,18 @@ Or open the lead on the dashboard and tap **Retry reply**. Replies run on their 
 When a lead you are handling writes again, the bot sends one short holding reply ("Thank you, <name>. Fredrick has your message and will contact you personally soon."), at most once per `HOLD_REPLY_COOLDOWN_HOURS`, and alerts you on WhatsApp (and email, if configured) at most once per 10 minutes per lead. If you have not answered after `OWNER_REPLY_REMINDER_MINUTES`, you get up to 3 reminders, 3 hours apart.
 
 The dashboard shows a red **Needs your reply** badge with the waiting time, and the **Needs reply** filter lists those leads. The app cannot see replies you type on your own phone, so **tap Mark contacted on the lead page after you reply**. That clears the flag and stops the reminders.
+
+## Replying and owner commands
+
+**From the dashboard:** open the lead and use the **Reply to <name>** box (max 1000 characters). It works only while the 24-hour window is open ("Reply window open until HH:MM"); otherwise it is disabled and says "Window closed. Message the lead from your own number." A successful send is stored as a message from **You**, marks the lead contacted, pauses the bot for that lead, clears the red **Needs your reply** flag and stops the reminders. A failed send shows Meta's error code and message and changes nothing else.
+
+**From WhatsApp:** text the business number from your owner number (`OWNER_WHATSAPP_NUMBER`). These are commands, not leads, and each one gets a short plain-text answer back:
+
+| Command | What it does |
+|---|---|
+| `list` | Up to 5 leads waiting for a reply: id, name, minutes waiting, product |
+| `done <id>` | Mark that lead contacted. Clears the flag, pauses the bot for them, stops reminders. Use it after you answered from your own phone |
+| `reply <id> <text>` | Send `<text>` to that lead through the business number (window must be open; otherwise you are told to message them from your own number) |
+| `help` | List the commands |
+
+Only the exact owner number can run commands, and only after the webhook signature has been verified. Any other text from the owner is ignored (or treated as a lead when `OWNER_AS_LEAD=1`). Every alert and reminder includes the lead id and the line `Reply "done <id>" after you have contacted them.`

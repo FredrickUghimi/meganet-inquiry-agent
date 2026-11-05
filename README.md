@@ -24,12 +24,27 @@ One Flask app, one database, one in-process scheduler, one Render web service. N
 
 Dashboard buttons: **Mark contacted** (logs it, pauses the bot), **Closed won/lost**, **Pause/Resume follow-ups**, **Reopen**. While a lead is paused, the bot sends no follow-ups *and* no auto-replies, so it won't talk over you. Claude still classifies their messages and will still alert you if they turn "ready".
 
+### Replying to a waiting prospect
+
+**From the dashboard:** open the lead and use the **Reply to <name>** box (max 1000 characters). It works only while the 24-hour window is open ("Reply window open until HH:MM"); otherwise it is disabled and says "Window closed. Message the lead from your own number." A successful send is stored as a message from **You**, marks the lead contacted, pauses the bot for that lead, clears the red **Needs your reply** flag and stops the reminders. A failed send shows Meta's error code and message and changes nothing else.
+
+**From WhatsApp:** text the business number from your owner number (`OWNER_WHATSAPP_NUMBER`). These are commands, not leads, and each one gets a short plain-text answer back:
+
+| Command | What it does |
+|---|---|
+| `list` | Up to 5 leads waiting for a reply: id, name, minutes waiting, product |
+| `done <id>` | Mark that lead contacted. Clears the flag, pauses the bot for them, stops reminders. Use it after you answered from your own phone |
+| `reply <id> <text>` | Send `<text>` to that lead through the business number (window must be open; otherwise you are told to message them from your own number) |
+| `help` | List the commands |
+
+Only the exact owner number can run commands, and only after the webhook signature has been verified. Any other text from the owner is ignored (or treated as a lead when `OWNER_AS_LEAD=1`). Every alert and reminder includes the lead id and the line `Reply "done <id>" after you have contacted them.`
+
 ### Things worth knowing
 
 - **The 24-hour rule.** After a lead's last WhatsApp message you have 24 hours to send free-form text. After that, WhatsApp only allows pre-approved **templates**. Day 1/3/7 follow-ups go out as templates. Each template has fixed wording plus a slot, `{{3}}`, that Claude fills with a fresh line each time (it is told what it said before, so it varies). If a lead is somehow still inside the window, the follow-up goes as plain text instead.
 - **Form/email leads and the first message.** Someone who emailed you has never messaged your WhatsApp number, so there is no open window and WhatsApp won't deliver a free-form first message. The `ack` template (`meganet_inquiry_ack`, enabled by default) is sent as the instant first message, so they get a reply right away. It only delivers once Meta has approved it (step 8); until then the send fails and is logged, and the Day 1/3/7 templates still follow.
 - **Escalation alerts have the same rule.** Alerts to Fredrick are tried as free-form messages first, which only work if Fredrick has messaged the business number within the last 24h. If that fails, the `escalation` template (`meganet_lead_alert`, enabled by default) is sent instead, once approved. The app logs loudly when an alert couldn't be delivered, and the lead still shows as **ready** (sorted to the top) in the dashboard.
-- **Messages from Fredrick's own number are ignored** by intake, so texting the business number never creates a lead.
+- **Messages from Fredrick's own number are ignored** by intake, so texting the business number never creates a lead. The exceptions are the owner commands above (`list`, `done`, `reply`, `help`).
 - **Product facts.** Claude may only state what's in `sentinel/knowledge.py`. **Edit that file** with accurate product details before going live. It is told never to quote prices, discounts or dates.
 - **Failures are contained.** A failed WhatsApp send is stored on the message (shown red in the dashboard) and logged. The scheduler carries on with other leads. A failed follow-up is retried after an hour; after 3 failures that lead's sequence is paused. If Claude is down, built-in fallback copy is used, so leads still get a reply.
 

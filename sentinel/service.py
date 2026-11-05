@@ -85,7 +85,16 @@ def window_open(lead):
     return bool(last and utcnow() - last.sent_at < WINDOW)
 
 
-def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=False, stage=None):
+def window_closes_at(lead):
+    """When free-form WhatsApp text to this lead stops being allowed, or None if the window is closed."""
+    last = (Message.query.filter_by(lead_id=lead.id, direction="inbound", channel="whatsapp")
+            .order_by(Message.sent_at.desc()).first())
+    if not last or utcnow() - last.sent_at >= WINDOW:
+        return None
+    return last.sent_at + WINDOW
+
+
+def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=False, stage=None, sender=None):
     """Send and log. Never raises: a failed send is stored as a failed Message. Returns the Message."""
     cfg = current_app.config
     external_id = error = None
@@ -104,7 +113,7 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
             text = templates_meta.render(template, params)
     msg = Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body=text, sent_at=utcnow(),
                   is_followup=is_followup, followup_stage=stage, external_id=external_id,
-                  status="failed" if error else "sent", error=error, handled=True)
+                  status="failed" if error else "sent", error=error, handled=True, sender=sender)
     db.session.add(msg)
     if not error:
         lead.last_contact_at = msg.sent_at
@@ -144,7 +153,8 @@ def send_owner_alert(lead, line):
     """Alert Fredrick by WhatsApp and, if configured, email. Failures are logged and never propagate.
     Returns True if any channel delivered; stamps lead.last_owner_alert_at (the throttle) on success."""
     url = f"{current_app.config['PUBLIC_BASE_URL']}/leads/{lead.id}"
-    line = templates_meta.clean_param(line, 400)
+    suffix = f' (lead {lead.id}) Reply "done {lead.id}" after you have contacted them.'
+    line = templates_meta.clean_param(line, 400 - len(suffix)) + suffix
     delivered = _alert_whatsapp(lead, line, url)
     mailed = emailer.send_alert(f"Mega-Net lead: {lead.display_name}", f"{line}\n{url}")
     delivered = bool(delivered or mailed)
@@ -181,14 +191,13 @@ def reply_wait_since(lead):
         return None
     out = Message.query.filter_by(lead_id=lead.id, direction="outbound")
     if is_waiting_state(lead):
-        out = out.filter(Message.channel == "manual")
+        out = out.filter(Message.status != "failed", db.or_(Message.channel == "manual", Message.sender == "owner"))
     else:
         out = out.filter(Message.status != "failed")
     marker = out.order_by(Message.sent_at.desc()).first()
     q = Message.query.filter_by(lead_id=lead.id, direction="inbound")
     if marker:
-        # WhatsApp timestamps have whole-second precision; do not lose a message sent in the second we replied
-        q = q.filter(Message.sent_at >= marker.sent_at.replace(microsecond=0))
+        q = q.filter(Message.sent_at > marker.sent_at)
     first = q.order_by(Message.sent_at.asc()).first()
     return first.sent_at if first else None
 
@@ -288,6 +297,120 @@ def run_owner_reminders(now=None):
         except Exception:
             db.session.rollback()
             log.exception("Reminder failed for lead %s", lead_id)
+
+
+# --- Fredrick acting on a waiting prospect (dashboard box and WhatsApp commands) -------------
+
+def mark_contacted(lead, note=True):
+    """Fredrick is handling this lead: pause the bot, clear the needs-reply flag, stop the reminders."""
+    now = utcnow()
+    if note:
+        db.session.add(Message(lead_id=lead.id, direction="outbound", channel="manual", sent_at=now,
+                               body="Marked as contacted by Fredrick.", handled=True, sender="owner"))
+    lead.last_contact_at = now
+    lead.followup_paused = True
+    if lead.status == "new":
+        lead.status = "engaged"
+    lead.next_followup_at = None
+    lead.reminder_count, lead.last_reminder_at, lead.reminder_episode_at = 0, None, None
+    db.session.commit()
+
+
+MAX_OWNER_REPLY = 1000
+
+
+def owner_reply(lead, text):
+    """Send Fredrick's free-form text to the lead. Returns (ok, detail). On success the lead is marked contacted.
+    Never logs the text."""
+    text = (text or "").strip()
+    if not text:
+        return False, "Write a message first."
+    if len(text) > MAX_OWNER_REPLY:
+        return False, f"Message is too long ({len(text)} of {MAX_OWNER_REPLY} characters)."
+    if not lead.phone:
+        return False, "This lead has no phone number."
+    if not whatsapp.is_configured():
+        return False, "WhatsApp is not connected."
+    if not window_closes_at(lead):
+        log.info("owner_reply lead=%s outcome=refused (24h window closed)", lead.id)
+        return False, "Window closed. Message the lead from your own number."
+    msg = send_whatsapp(lead, text=text, sender="owner")
+    if msg.status == "failed":
+        log.info("owner_reply lead=%s outcome=failed (%s)", lead.id, msg.error)
+        return False, f"Send failed: {msg.error}"
+    mark_contacted(lead, note=False)
+    log.info("owner_reply lead=%s outcome=sent chars=%d", lead.id, len(text))
+    return True, "Reply sent. Lead marked contacted; the bot is paused for them."
+
+
+COMMANDS = ("done", "reply", "list", "help")
+HELP_TEXT = ('Commands:\n"list": leads waiting for you\n"done <id>": mark contacted\n'
+             '"reply <id> <text>": send text to the lead\n"help": this list')
+
+
+def is_owner_command(text):
+    words = (text or "").strip().split(None, 1)
+    return bool(words) and words[0].lower().rstrip(":") in COMMANDS
+
+
+def _lead_from_arg(arg):
+    try:
+        return db.session.get(Lead, int((arg or "").lstrip("#")))
+    except ValueError:
+        return None
+
+
+def owner_command(text):
+    """Run one owner command. Returns (command_name, confirmation_text_for_Fredrick)."""
+    parts = text.strip().split(None, 2)
+    cmd = parts[0].lower().rstrip(":")
+    arg = parts[1] if len(parts) > 1 else ""
+    if cmd == "help":
+        return cmd, HELP_TEXT
+    if cmd == "list":
+        rows = sorted(((reply_wait_since(l), l) for l in Lead.query.all()), key=lambda r: (r[0] is None, r[0]))
+        rows = [(w, l) for w, l in rows if w is not None]
+        if not rows:
+            return cmd, "No leads need a reply."
+        now = utcnow()
+        lines = [f"{l.id} {l.display_name}, {int((now - w).total_seconds() // 60)} min, "
+                 f"{ai.PRODUCT_LABELS[l.product_interest]}" for w, l in rows[:5]]
+        more = f"\n(+{len(rows) - 5} more)" if len(rows) > 5 else ""
+        return cmd, "Needs a reply:\n" + "\n".join(lines) + more
+    lead = _lead_from_arg(arg)
+    if not arg:
+        return cmd, f"Usage: {cmd} <id>" + (" <text>" if cmd == "reply" else "")
+    if lead is None:
+        return cmd, f'No lead with id "{arg[:20]}". Send "list" to see who needs a reply.'
+    if cmd == "done":
+        mark_contacted(lead)
+        return cmd, f"Done: {lead.display_name} (id {lead.id}) marked contacted. Bot paused, reminders stopped."
+    body = parts[2] if len(parts) > 2 else ""
+    if not body.strip():
+        return cmd, "Usage: reply <id> <text>"
+    ok, detail = owner_reply(lead, body)
+    if ok:
+        return cmd, f"Sent to {lead.display_name} (id {lead.id}). Marked contacted."
+    if detail.startswith("Window closed"):
+        return cmd, (f"Window closed for {lead.display_name} (id {lead.id}). Message them from your own number, "
+                     f'then send "done {lead.id}".')
+    return cmd, detail
+
+
+def run_owner_command(text):
+    """Execute an owner command and text the result back to Fredrick."""
+    owner = current_app.config["OWNER_WHATSAPP_NUMBER"]
+    try:
+        cmd, answer = owner_command(text)
+    except Exception:
+        db.session.rollback()
+        log.exception("Owner command failed")
+        cmd, answer = "error", "Sorry, that command failed. Check the logs."
+    try:
+        whatsapp.send_text(owner, answer)
+        log.info("owner command=%s outcome=confirmed", cmd)
+    except Exception as exc:
+        log.warning("owner command=%s confirmation not delivered: %s", cmd, exc)
 
 
 # --- inbound handling -----------------------------------------------------------------------

@@ -48,6 +48,14 @@ def local_time(dt):
     return dt.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%d %b %Y %H:%M")
 
 
+@bp.app_template_filter("clock")
+def clock(dt):
+    from datetime import timezone
+    if not dt:
+        return "—"
+    return dt.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(current_app.config["DISPLAY_TZ"])).strftime("%H:%M")
+
+
 @bp.app_context_processor
 def inject():
     return {"csrf_token": csrf_token, "PRODUCT_NAMES": PRODUCT_NAMES, "wait_label": service.wait_label,
@@ -104,7 +112,16 @@ def leads():
 @login_required
 def lead_detail(lead_id):
     lead = db.session.get(Lead, lead_id) or abort(404)
-    return render_template("lead.html", lead=lead)
+    return render_template("lead.html", lead=lead, window_until=service.window_closes_at(lead))
+
+
+@bp.post("/leads/<int:lead_id>/reply")
+@login_required
+def owner_reply(lead_id):
+    lead = db.session.get(Lead, lead_id) or abort(404)
+    ok, detail = service.owner_reply(lead, request.form.get("text", ""))
+    flash(detail)
+    return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 
 
 ACTIONS = {"contacted", "closed_won", "closed_lost", "pause", "resume", "reopen"}
@@ -120,13 +137,7 @@ def lead_action(lead_id):
     now = utcnow()
     if action == "contacted":
         # You are talking to them now: log it, pause the bot's follow-ups and auto-replies.
-        db.session.add(Message(lead_id=lead.id, direction="outbound", channel="manual", sent_at=now,
-                               body="Marked as contacted by Fredrick.", handled=True))
-        lead.last_contact_at = now
-        lead.followup_paused = True
-        if lead.status == "new":
-            lead.status = "engaged"
-        lead.next_followup_at = None
+        service.mark_contacted(lead)
     elif action in ("closed_won", "closed_lost"):
         lead.status = action
         lead.next_followup_at = None
