@@ -94,16 +94,24 @@ def window_closes_at(lead):
     return last.sent_at + WINDOW
 
 
-def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=False, stage=None, sender=None):
+def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=False, stage=None, sender=None, reply_to=None):
     """Send and log. Never raises: a failed send is stored as a failed Message. Returns the Message."""
     cfg = current_app.config
     external_id = error = None
+    quote_dropped = False
     try:
         if template:
             params = [templates_meta.clean_param(p) for p in params]
             name = cfg[templates_meta.TEMPLATES[template]["env"]]
             external_id = whatsapp.send_template(lead.phone, name, cfg["WHATSAPP_TEMPLATE_LANG"], params)
             text = templates_meta.render(template, params)
+        elif reply_to:
+            try:
+                external_id = whatsapp.send_text(lead.phone, text, reply_to=reply_to)
+            except Exception as exc:  # Meta may refuse the quote (deleted/expired message): send it plain
+                log.info("quoted send to lead %s rejected (%s); sending without the quote", lead.id, exc)
+                quote_dropped = True
+                external_id = whatsapp.send_text(lead.phone, text)
         else:
             external_id = whatsapp.send_text(lead.phone, text)
     except Exception as exc:
@@ -118,6 +126,7 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
     if not error:
         lead.last_contact_at = msg.sent_at
     db.session.commit()
+    msg.quote_dropped = quote_dropped  # transient, for the caller's flash note
     return msg
 
 
@@ -183,12 +192,12 @@ def is_waiting_state(lead):
     return lead.status not in CLOSED and (lead.status == "ready" or lead.followup_paused)
 
 
-def reply_wait_since(lead):
-    """When the oldest inbound message still waiting for an answer arrived, or None.
+def _waiting_inbound(lead):
+    """Inbound messages still waiting for an answer, oldest first.
     Ready/paused/contacted leads are answered only by Fredrick (a stored owner message or Mark contacted);
     for other leads any successful outbound message, including the bot's, counts as the answer."""
     if lead.status in CLOSED:
-        return None
+        return []
     out = Message.query.filter_by(lead_id=lead.id, direction="outbound")
     if is_waiting_state(lead):
         out = out.filter(Message.status != "failed", db.or_(Message.channel == "manual", Message.sender == "owner"))
@@ -198,8 +207,17 @@ def reply_wait_since(lead):
     q = Message.query.filter_by(lead_id=lead.id, direction="inbound")
     if marker:
         q = q.filter(Message.sent_at > marker.sent_at)
-    first = q.order_by(Message.sent_at.asc()).first()
-    return first.sent_at if first else None
+    return q.order_by(Message.sent_at.asc(), Message.id.asc()).all()
+
+
+def waiting_message_ids(lead):
+    return {m.id for m in _waiting_inbound(lead)}
+
+
+def reply_wait_since(lead):
+    """When the oldest inbound message still waiting for an answer arrived, or None."""
+    waiting = _waiting_inbound(lead)
+    return waiting[0].sent_at if waiting else None
 
 
 def wait_label(lead, now=None):
@@ -319,7 +337,7 @@ def mark_contacted(lead, note=True):
 MAX_OWNER_REPLY = 1000
 
 
-def owner_reply(lead, text):
+def owner_reply(lead, text, quote=None):
     """Send Fredrick's free-form text to the lead. Returns (ok, detail). On success the lead is marked contacted.
     Never logs the text."""
     text = (text or "").strip()
@@ -334,13 +352,23 @@ def owner_reply(lead, text):
     if not window_closes_at(lead):
         log.info("owner_reply lead=%s outcome=refused (24h window closed)", lead.id)
         return False, "Window closed. Message the lead from your own number."
-    msg = send_whatsapp(lead, text=text, sender="owner")
+    quote_id, note = None, ""
+    if quote is not None:
+        if quote.lead_id != lead.id or quote.direction != "inbound":
+            return False, "That quoted message does not belong to this lead."
+        if quote.external_id and quote.channel == "whatsapp":
+            quote_id = quote.external_id
+        else:
+            note = " Note: that message has no WhatsApp id, so it was sent without the quote."
+    msg = send_whatsapp(lead, text=text, sender="owner", reply_to=quote_id)
     if msg.status == "failed":
         log.info("owner_reply lead=%s outcome=failed (%s)", lead.id, msg.error)
         return False, f"Send failed: {msg.error}"
+    if msg.quote_dropped:
+        note = " Note: WhatsApp rejected the quote, so it was sent without it."
     mark_contacted(lead, note=False)
-    log.info("owner_reply lead=%s outcome=sent chars=%d", lead.id, len(text))
-    return True, "Reply sent. Lead marked contacted; the bot is paused for them."
+    log.info("owner_reply lead=%s outcome=sent chars=%d quoted=%s", lead.id, len(text), bool(quote_id and not msg.quote_dropped))
+    return True, "Reply sent. Lead marked contacted; the bot is paused for them." + note
 
 
 COMMANDS = ("done", "reply", "list", "help")

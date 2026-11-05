@@ -112,14 +112,27 @@ def leads():
 @login_required
 def lead_detail(lead_id):
     lead = db.session.get(Lead, lead_id) or abort(404)
-    return render_template("lead.html", lead=lead, window_until=service.window_closes_at(lead))
+    quoted = None
+    if request.args.get("quote", "").isdigit():
+        q = db.session.get(Message, int(request.args["quote"]))
+        if q and q.lead_id == lead.id and q.direction == "inbound":
+            quoted = q
+    quoted_text = ""
+    if quoted:
+        body = " ".join(quoted.body.split())
+        quoted_text = body[:80] + ("..." if len(body) > 80 else "")
+    return render_template("lead.html", lead=lead, window_until=service.window_closes_at(lead),
+                           waiting_ids=service.waiting_message_ids(lead), quoted=quoted, quoted_text=quoted_text)
 
 
 @bp.post("/leads/<int:lead_id>/reply")
 @login_required
 def owner_reply(lead_id):
     lead = db.session.get(Lead, lead_id) or abort(404)
-    ok, detail = service.owner_reply(lead, request.form.get("text", ""))
+    quote = None
+    if request.form.get("quote", "").isdigit():
+        quote = db.session.get(Message, int(request.form["quote"]))
+    ok, detail = service.owner_reply(lead, request.form.get("text", ""), quote=quote)
     flash(detail)
     return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 

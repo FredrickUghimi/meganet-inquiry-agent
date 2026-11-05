@@ -34,29 +34,49 @@
     </form>
   </div>
 </div>
-<div class="card">
-  <h3 style="margin-top:0">Reply to {{ lead.display_name }}</h3>
-  {% if window_until %}<p class="mute">Reply window open until {{ window_until|clock }}</p>
-  {% else %}<p class="mute">Window closed. Message the lead from your own number.</p>{% endif %}
-  <form method="post" action="{{ url_for('dashboard.owner_reply', lead_id=lead.id) }}">
-    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-    <textarea name="text" maxlength="1000" rows="3" style="width:100%" {{ 'disabled' if not window_until or not lead.phone }} placeholder="Type your reply (max 1000 characters)"></textarea>
-    <p><button class="primary" {{ 'disabled' if not window_until or not lead.phone }}>Send as You</button></p>
-  </form>
-</div>
-<div class="card">
+<div class="card" style="margin-bottom:0">
   <h3 style="margin-top:0">Conversation</h3>
   <div class="msgs">
   {% for m in lead.messages %}
-    <div class="msg {{ 'in' if m.direction == 'inbound' else 'out' }}{{ ' failed' if m.status == 'failed' }}">
+    <div class="msg {{ 'in' if m.direction == 'inbound' else 'out' }}{{ ' failed' if m.status == 'failed' }}" id="m{{ m.id }}">
       {{ m.body }}
       <div class="meta">{% if m.sender == 'owner' %}<b>You</b> · {% endif %}{{ m.sent_at|local }} · {{ m.channel }}
         {%- if m.is_followup %} · follow-up day {{ m.followup_stage }}{% endif %}
-        {%- if m.status == 'failed' %} · NOT DELIVERED: {{ m.error }}{% endif %}</div>
+        {%- if m.status == 'failed' %} · NOT DELIVERED: {{ m.error }}{% endif %}
+        {%- if m.direction == 'inbound' and m.id in waiting_ids %} · <span class="badge" style="background:#fee2e2;color:#b91c1c">Waiting</span>{% endif %}
+        {%- if m.direction == 'inbound' and lead.phone %} · <a href="{{ url_for('dashboard.lead_detail', lead_id=lead.id, quote=m.id) }}#composer">Reply</a>{% endif %}</div>
     </div>
   {% else %}
     <p class="mute">No messages.</p>
   {% endfor %}
   </div>
+  <div id="newest"></div>
 </div>
+<div class="card composer" id="composer">
+  {% if window_until %}<div class="mute">Reply window open until {{ window_until|clock }}</div>
+  {% else %}<div class="mute">Window closed. Message the lead from your own number.</div>{% endif %}
+  {% if quoted %}<div class="quote">Replying to: {{ quoted_text }} <a href="{{ url_for('dashboard.lead_detail', lead_id=lead.id) }}#composer">Cancel</a></div>{% endif %}
+  <form method="post" action="{{ url_for('dashboard.owner_reply', lead_id=lead.id) }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% if quoted %}<input type="hidden" name="quote" value="{{ quoted.id }}">{% endif %}
+    <textarea name="text" maxlength="1000" rows="2" {{ 'disabled' if not window_until or not lead.phone }} placeholder="Reply to {{ lead.display_name }} (max 1000 characters)"></textarea>
+    <button class="primary" {{ 'disabled' if not window_until or not lead.phone }}>Send as You</button>
+  </form>
+</div>
+<style>
+  .composer { margin-top:0; border-top:2px solid var(--line); }
+  .composer form { display:flex; gap:8px; align-items:flex-end; margin-top:6px; }
+  .composer textarea { flex:1; }
+  .quote { background:var(--bg); border-left:3px solid var(--brand); padding:4px 10px; margin-top:6px; font-size:13px; }
+  @media (max-width:700px) {
+    .composer { position:sticky; bottom:0; z-index:5; border-radius:10px 10px 0 0; margin-bottom:-48px; }
+  }
+</style>
+<script>
+  // Open scrolled to the newest message (unless the URL points somewhere, e.g. #composer after tapping Reply).
+  window.addEventListener('load', function () {
+    var el = document.getElementById(location.hash ? location.hash.slice(1) : 'newest');
+    if (el) el.scrollIntoView({block: 'end'});
+  });
+</script>
 {% endblock %}

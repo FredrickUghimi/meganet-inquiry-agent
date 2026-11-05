@@ -44,9 +44,13 @@ def _post(payload):
         return None
 
 
-def send_text(to, body):
-    """Free-form text. Only delivered inside the 24h customer service window."""
-    return _post({"to": to, "type": "text", "text": {"body": body, "preview_url": False}})
+def send_text(to, body, reply_to=None):
+    """Free-form text. Only delivered inside the 24h customer service window.
+    reply_to: wamid of an inbound message to quote (WhatsApp reply context)."""
+    payload = {"to": to, "type": "text", "text": {"body": body, "preview_url": False}}
+    if reply_to:
+        payload["context"] = {"message_id": reply_to}
+    return _post(payload)
 
 
 def send_template(to, name, lang, params):
