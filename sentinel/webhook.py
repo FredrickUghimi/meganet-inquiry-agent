@@ -45,6 +45,15 @@ def _body_of(m):
     return f"[{kind or 'unsupported'} message]"
 
 
+def _choice_of(m):
+    """Id of the tapped button or list row for an interactive reply, else None."""
+    if m.get("type") != "interactive":
+        return None
+    inter = m.get("interactive") or {}
+    reply = inter.get("button_reply") or inter.get("list_reply") or {}
+    return str(reply["id"])[:32] if reply.get("id") else None
+
+
 @bp.get("/webhook")
 def verify():
     expected = current_app.config["WHATSAPP_VERIFY_TOKEN"]
@@ -114,7 +123,8 @@ def receive():
                         lead = service.find_or_create_lead(phone=phone, name=names.get(sender), source="whatsapp")
                         at = datetime.fromtimestamp(int(m["timestamp"]), timezone.utc).replace(tzinfo=None) \
                             if m.get("timestamp") else None
-                        if service.record_inbound(lead, _body_of(m), "whatsapp", external_id=m.get("id"), at=at):
+                        if service.record_inbound(lead, _body_of(m), "whatsapp", external_id=m.get("id"), at=at,
+                                                 choice_id=_choice_of(m)):
                             to_handle[lead.id] = (phone, phone_id)
                             _log_event("message", phone, phone_id,
                                        f"{'updated' if existed else 'created'} lead {lead.id}")

@@ -39,7 +39,7 @@
   <div class="msgs">
   {% for m in lead.messages %}
     <div class="msg {{ 'in' if m.direction == 'inbound' else 'out' }}{{ ' failed' if m.status == 'failed' }}" id="m{{ m.id }}">
-      {{ m.body }}
+      {% if m.choice_id %}Chose: {{ m.body }}{% else %}{{ m.body }}{% endif %}
       <div class="meta">{% if m.sender == 'owner' %}<b>You</b> · {% endif %}{{ m.sent_at|local }} · {{ m.channel }}
         {%- if m.is_followup %} · follow-up day {{ m.followup_stage }}{% endif %}
         {%- if m.status == 'failed' %} · NOT DELIVERED: {{ m.error }}{% endif %}

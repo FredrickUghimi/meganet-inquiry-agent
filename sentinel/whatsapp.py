@@ -53,6 +53,13 @@ def send_text(to, body, reply_to=None):
     return _post(payload)
 
 
+def send_buttons(to, body, buttons):
+    """Interactive reply-button message (free-form: only inside the 24h window). buttons: [(id, title), ...]."""
+    return _post({"to": to, "type": "interactive", "interactive": {
+        "type": "button", "body": {"text": body},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": i, "title": t}} for i, t in buttons]}}})
+
+
 def send_template(to, name, lang, params):
     """Pre-approved template with positional body variables {{1}}, {{2}}, ..."""
     template = {"name": name, "language": {"code": lang}}

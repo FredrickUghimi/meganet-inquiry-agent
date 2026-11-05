@@ -101,7 +101,7 @@ def test_alert_falls_back_to_template_when_window_closed(app, sent, claude, monk
 
 def test_engaged_lead_behaviour_unchanged(app, sent, claude):
     claude["intent"] = "exploring"
-    say(app, "wamid.a", "Hi")
+    say(app, "wamid.a", "Hi, we run a clinic")
     say(app, "wamid.b", "We have 15 staff")
     assert [s[2] for s in sent if s[1] == LEAD] == ["reply:first_contact", "reply:continue"]
     assert alerts(sent) == [] and not holding(sent)

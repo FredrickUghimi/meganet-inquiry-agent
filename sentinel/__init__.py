@@ -31,6 +31,10 @@ NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters ex
     ("leads", "last_reminder_at", "TIMESTAMP"),
     ("leads", "reminder_episode_at", "TIMESTAMP"),
     ("messages", "sender", "VARCHAR(8)"),
+    ("leads", "menu_sent_at", "TIMESTAMP"),
+    ("leads", "awaiting_choice", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("leads", "needs_owner", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("messages", "choice_id", "VARCHAR(32)"),
 )
 
 
