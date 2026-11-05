@@ -48,7 +48,7 @@ def test_dashboard_reply_inside_window_sends_marks_contacted_and_clears_flag(app
     db.session.commit()
     c = client(app)
     page = c.get(f"/leads/{lead.id}").data.decode()
-    assert "Reply window open until" in page and "disabled" not in page.split("Send as You")[0].split("<textarea")[1]
+    assert "Reply window open until" in page and "disabled" not in page.split('aria-label="Send reply"')[0].split("<textarea")[1]
     age_inbound(0)  # keep the window open
     r = c.post(f"/leads/{lead.id}/reply", data={"csrf": "t", "text": "Hello, Fredrick here SECRETREPLY"}, follow_redirects=True)
     assert b"Reply sent" in r.data

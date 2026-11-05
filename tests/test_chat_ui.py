@@ -162,3 +162,23 @@ def test_csrf_limit_and_window_still_enforced(app, sent, claude, monkeypatch):
     assert b"Window closed" in c.post(f"/leads/{lead.id}/reply", data={"csrf": "t", "text": "x"},
                                       follow_redirects=True).data
     assert calls == []
+
+
+def test_send_button_is_an_icon_below_the_textbox_with_accessible_name(app, sent, claude):
+    lead = ready_lead_with_messages(app, sent, claude)
+    c = client(app)
+    page = c.get(f"/leads/{lead.id}").data.decode()
+    form = page[page.index('id="composer"'):]
+    assert "Send as You" not in page
+    assert form.index("<textarea") < form.index('aria-label="Send reply"')  # button under the text box
+    assert 'title="Send reply"' in form and '<span class="sr-only">Send reply</span>' in form
+    assert "<svg" in form and "http" not in form[form.index("<svg"):form.index("</svg>")]  # inline, no external file
+    assert "flex-direction:column" in page and "width:100%" in page
+    button = form[form.index("<button"):form.index("</button>")]
+    assert "disabled" not in button  # window open
+    for m in Message.query.filter_by(direction="inbound"):
+        m.sent_at = utcnow() - timedelta(hours=30)
+    db.session.commit()
+    closed = c.get(f"/leads/{lead.id}").data.decode()
+    closed_button = closed[closed.index('class="primary send-btn"'):]
+    assert "disabled" in closed_button.split(">")[0]
