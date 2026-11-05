@@ -142,6 +142,16 @@ def lead_action(lead_id):
     return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 
 
+@bp.post("/leads/<int:lead_id>/retry")
+@login_required
+def retry_reply(lead_id):
+    """Re-run the reply pipeline for the lead's latest inbound message, synchronously, and flash the outcome."""
+    lead = db.session.get(Lead, lead_id) or abort(404)
+    outcome, reason = service.handle_lead_reply(lead.id, retry=True)
+    flash(f"Retry reply: {outcome}. {reason}")
+    return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
+
+
 @bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_inquiry():

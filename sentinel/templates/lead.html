@@ -25,6 +25,9 @@
     {{ act('closed_lost', 'Closed lost') }}
     {% if lead.followup_paused %}{{ act('resume', 'Resume follow-ups') }}{% else %}{{ act('pause', 'Pause follow-ups') }}{% endif %}
     {% if lead.status in ('closed_won', 'closed_lost') %}{{ act('reopen', 'Reopen') }}{% endif %}
+    <form method="post" action="{{ url_for('dashboard.retry_reply', lead_id=lead.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Retry reply</button>
+    </form>
   </div>
 </div>
 <div class="card">

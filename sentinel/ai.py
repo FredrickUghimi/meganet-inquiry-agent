@@ -88,7 +88,21 @@ CLASSIFY_TOOL = {
 }
 
 
+def describe_error(exc):
+    """Error type (plus HTTP status for API errors); never includes keys."""
+    status = getattr(exc, "status_code", None)
+    return f"{type(exc).__name__}" + (f" http={status}" if status else "")
+
+
 def classify(lead, messages):
+    try:
+        return _classify(lead, messages)
+    except Exception as exc:
+        log.warning("claude classify failed: %s", describe_error(exc))
+        raise
+
+
+def _classify(lead, messages):
     response = _get_client().messages.create(
         model=current_app.config["ANTHROPIC_MODEL"],
         max_tokens=400,
@@ -105,6 +119,7 @@ def classify(lead, messages):
             if data.get("product") not in PRODUCT_LABELS:
                 data["product"] = "unsure"
             data["summary"] = (data.get("summary") or "")[:300]
+            log.info("claude classify ok intent=%s product=%s", data["intent"], data["product"])
             return data
     raise RuntimeError("Claude returned no classification")
 
@@ -152,9 +167,11 @@ def draft_reply(lead, messages, situation):
         )
         text = _text(response)
         if text:
+            log.info("claude draft_reply ok chars=%d", len(text))
             return text[:1000]
-    except Exception:
-        log.exception("Claude reply draft failed; using fallback copy")
+        log.warning("claude draft_reply returned empty text; using fallback copy")
+    except Exception as exc:
+        log.exception("Claude reply draft failed (%s); using fallback copy", describe_error(exc))
     return FALLBACK_REPLIES[situation]
 
 

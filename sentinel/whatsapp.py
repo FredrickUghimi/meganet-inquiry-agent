@@ -27,6 +27,7 @@ def _post(payload):
         resp = requests.post(url, json={"messaging_product": "whatsapp", **payload},
                              headers={"Authorization": f"Bearer {token}"}, timeout=15)
     except requests.RequestException as exc:
+        log.warning("whatsapp send failed: network error %s", type(exc).__name__)
         raise WhatsAppError(f"network error: {exc}") from exc
     if resp.status_code >= 400:
         try:
@@ -34,7 +35,9 @@ def _post(payload):
             detail = f"{err.get('message')} (code {err.get('code')})"
         except ValueError:
             detail = resp.text[:200]
+        log.warning("whatsapp send failed: HTTP %s %s", resp.status_code, detail)
         raise WhatsAppError(f"HTTP {resp.status_code}: {detail}")
+    log.info("whatsapp send ok: HTTP %s", resp.status_code)
     try:
         return resp.json()["messages"][0]["id"]
     except (ValueError, KeyError, IndexError):

@@ -144,3 +144,78 @@ def test_bad_signature_logged(app, caplog):
     caplog.set_level(logging.INFO)
     assert post(app, text_value(LEAD), secret=b"wrong").status_code == 403
     assert "invalid or missing X-Hub-Signature-256" in caplog.text
+
+
+# --- reply pipeline regressions ---------------------------------------------------------------
+
+def reply_lines(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("reply lead=")]
+
+
+def test_existing_lead_new_message_gets_reply_with_start_and_end_logs(app, sent, claude, caplog):
+    post(app, text_value(LEAD, mid="wamid.a"))
+    assert len(sent) == 1
+    caplog.set_level(logging.INFO)
+    post(app, text_value(LEAD, mid="wamid.b", body="we have 12 staff"))
+    assert len(sent) == 2 and sent[1] == ("text", LEAD, "reply:continue")
+    lines = reply_lines(caplog)
+    assert "started" in lines[0]
+    assert "finished outcome=replied reason=continue" in lines[-1]
+
+
+def test_skipped_reply_logs_reason(app, sent, claude, caplog):
+    post(app, text_value(LEAD, mid="wamid.a"))
+    lead = Lead.query.one()
+    lead.followup_paused = True
+    db.session.commit()
+    sent.clear()
+    caplog.set_level(logging.INFO)
+    post(app, text_value(LEAD, mid="wamid.b"))
+    assert sent == []
+    assert "finished outcome=skipped reason=follow-ups paused" in reply_lines(caplog)[-1]
+
+
+def test_run_async_uses_own_thread_not_scheduler(app, sent, claude):
+    import threading
+    from sentinel.scheduler import run_async
+    app.extensions["sentinel_scheduler"] = object()  # a dead/forked scheduler must not matter
+    done = threading.Event()
+    run_async(app, lambda: done.set())
+    assert done.wait(5)
+    app.extensions.pop("sentinel_scheduler")
+
+
+def test_sweeper_answers_stuck_unhandled_message(app, sent, claude):
+    from datetime import timedelta
+    from sentinel import service
+    lead = service.find_or_create_lead(phone=LEAD, name="A")
+    service.record_inbound(lead, "hello", "whatsapp", external_id="w1", at=utcnow() - timedelta(minutes=10))
+    service.run_unanswered()
+    assert sent == [("text", LEAD, "reply:first_contact")]
+    sent.clear()
+    service.run_unanswered()
+    assert sent == []
+
+
+def test_retry_button_replies_flashes_and_requires_csrf(app, sent, claude):
+    post(app, text_value(LEAD, mid="wamid.a"))
+    lead = Lead.query.one()
+    sent.clear()
+    c = app.test_client()
+    with c.session_transaction() as sess:
+        sess["auth"], sess["csrf"] = True, "tok"
+    assert c.post(f"/leads/{lead.id}/retry", data={}).status_code == 400
+    r = c.post(f"/leads/{lead.id}/retry", data={"csrf": "tok"}, follow_redirects=True)
+    assert b"Retry reply: replied" in r.data
+    assert sent == [("text", LEAD, "reply:continue")]
+    assert b"Retry reply</button>" in c.get(f"/leads/{lead.id}").data
+
+
+def test_dry_run_sends_and_writes_nothing(app, sent, claude):
+    from sentinel import service
+    post(app, text_value(LEAD, mid="wamid.a"))
+    sent.clear()
+    lines = []
+    out = service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
+    assert out[0] == "skipped" and "dry run" in out[1] and sent == []
+    assert any("claude classify ok" in l for l in lines)

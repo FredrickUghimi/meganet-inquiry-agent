@@ -63,3 +63,16 @@ Every `POST /webhook` event writes one INFO log line: `webhook event kind=... se
 - `ignored (phone_number_id is not ours)`: the message was for a different number than `WHATSAPP_PHONE_NUMBER_ID` (also what Meta's dashboard "Test" button sends).
 - `ignored (duplicate delivery ...)`: Meta retried a message already stored.
 - `reply ... ignored (lead is closed_lost ...)` / `(follow-ups paused ...)` / `(lead already ready ...)`: the lead exists but the bot is deliberately quiet.
+
+## Troubleshooting: "lead is stored but no reply"
+
+Each reply attempt logs `reply lead=N started ...` and `reply lead=N finished outcome=<replied|skipped|failed> reason=...`, plus `claude classify ok/failed`, `claude draft_reply ok` and `whatsapp send ok: HTTP 200` / `whatsapp send failed: HTTP 4xx <Meta message> (code N)`. Search the Render logs for `reply lead`.
+
+In the Render Shell:
+
+```
+python scripts/diagnose.py --lead 2          # safe: checks settings, tests Claude, walks the pipeline, sends nothing
+python scripts/diagnose.py --lead 2 --send   # same, but really sends the reply
+```
+
+Or open the lead on the dashboard and tap **Retry reply**. Replies run on their own thread, and a safety-net sweep (every follow-up tick) answers any inbound message left unanswered for 2+ minutes.

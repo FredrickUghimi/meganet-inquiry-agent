@@ -149,91 +149,134 @@ def notify_owner(lead, summary, kind):
 STATUS_FOR_INTENT = {"exploring": "engaged", "ready_demo": "ready", "ready_pricing": "ready", "not_fit": "closed_lost"}
 
 
-def handle_lead_reply(lead_id):
-    """Classify the lead's unhandled message(s), update the record, reply, and alert Fredrick if ready.
-    Multiple rapid messages are claimed together and answered once."""
+def handle_lead_reply(lead_id, *, retry=False, dry_run=False, trace=None):
+    """Run the reply pipeline for a lead and return (outcome, reason).
+
+    Always logs one INFO line when it starts and one when it ends ("reply lead=N finished outcome=... reason=...").
+    outcome is one of: replied, skipped, failed.
+    retry=True re-processes the lead's latest inbound message even if it was already handled.
+    dry_run=True makes the real Claude calls but writes nothing and sends nothing.
+    trace, if given, is called with each decision line (used by scripts/diagnose.py).
+    """
+    def say(msg):
+        log.info("reply lead=%s %s", lead_id, msg)
+        if trace:
+            trace(msg)
+
+    say(f"started (retry={retry} dry_run={dry_run})")
+    try:
+        outcome, reason = _reply_pipeline(lead_id, retry, dry_run, say)
+    except Exception as exc:
+        db.session.rollback()
+        log.exception("reply lead=%s crashed", lead_id)
+        outcome, reason = "failed", f"{type(exc).__name__}: {exc}"[:300]
+    say(f"finished outcome={outcome} reason={reason}")
+    return outcome, reason
+
+
+def _reply_pipeline(lead_id, retry, dry_run, say):
     lead = db.session.get(Lead, lead_id)
     if lead is None:
-        log.info("reply lead=%s outcome=ignored (lead not found)", lead_id)
-        return
-    who = mask_phone(lead.phone)
-    pending = Message.query.filter_by(lead_id=lead_id, direction="inbound", handled=False).all()
+        return "skipped", "lead not found"
+    say(f"lead status={lead.status} paused={lead.followup_paused} stage={lead.followup_stage} "
+        f"sender={mask_phone(lead.phone)} whatsapp_configured={whatsapp.is_configured()}")
+
+    if retry:
+        latest = (Message.query.filter_by(lead_id=lead_id, direction="inbound")
+                  .order_by(Message.sent_at.desc(), Message.id.desc()).first())
+        pending = [latest] if latest else []
+    else:
+        pending = Message.query.filter_by(lead_id=lead_id, direction="inbound", handled=False).all()
     if not pending:
-        log.info("reply lead=%s sender=%s outcome=ignored (no unhandled messages)", lead_id, who)
-        return
-    claimed = (Message.query.filter(Message.id.in_([m.id for m in pending]), Message.handled.is_(False))
-               .update({"handled": True}, synchronize_session=False))
-    db.session.commit()
-    if not claimed:
-        log.info("reply lead=%s sender=%s outcome=ignored (another worker claimed the messages)", lead_id, who)
-        return
+        return "skipped", "no inbound message to answer" if retry else "no unhandled inbound messages (already answered or claimed)"
+    say(f"{len(pending)} inbound message(s) to answer")
+
+    if not dry_run and not retry:
+        claimed = (Message.query.filter(Message.id.in_([m.id for m in pending]), Message.handled.is_(False))
+                   .update({"handled": True}, synchronize_session=False))
+        db.session.commit()
+        if not claimed:
+            return "skipped", "another worker claimed the messages"
+    elif not dry_run:
+        Message.query.filter(Message.id.in_([m.id for m in pending])).update({"handled": True},
+                                                                              synchronize_session=False)
+        db.session.commit()
 
     if lead.status in ("closed_won", "closed_lost"):
-        log.info("reply lead=%s sender=%s outcome=ignored (lead is %s; no auto-reply)", lead_id, who, lead.status)
-        return  # logged only; Fredrick decides whether to reopen
+        return "skipped", f"lead is {lead.status}; no auto-reply (reopen it on the dashboard)"
 
     first_contact = not Message.query.filter(
         Message.lead_id == lead_id, Message.direction == "outbound", Message.status != "failed",
         Message.is_followup.is_(False)).count()
     inbound_count = Message.query.filter_by(lead_id=lead_id, direction="inbound").count()
     history = list(lead.messages)
+    say(f"first_contact={first_contact} inbound_count={inbound_count} history={len(history)}")
 
     try:
         result = ai.classify(lead, history)
-    except Exception:
+        say(f"claude classify ok: intent={result['intent']} product={result['product']}")
+    except Exception as exc:
         log.exception("Classification failed for lead %s; treating as exploring", lead_id)
+        say(f"claude classify FAILED ({type(exc).__name__}); treating as exploring")
         result = {"intent": "exploring", "product": "unsure", "name": None, "summary": ""}
 
     intent = result["intent"]
-    was_ready = lead.status == "ready"
-    if result["product"] != "unsure":
-        lead.product_interest = result["product"]
-    if result.get("name") and not lead.name:
-        lead.name = result["name"][:120]
-    lead.intent, lead.summary = intent, result["summary"]
+    old_status = lead.status
+    was_ready = old_status == "ready"
     if intent == "exploring":
-        lead.status = "engaged" if (inbound_count > 1 or lead.status != "new") else "new"
+        new_status = "engaged" if (inbound_count > 1 or lead.status != "new") else "new"
     else:
-        lead.status = STATUS_FOR_INTENT[intent]
-    lead.next_followup_at = next_followup_time(lead)
-    db.session.commit()
-
-    newly_ready = lead.status == "ready" and not was_ready
-    if newly_ready:
+        new_status = STATUS_FOR_INTENT[intent]
+    if not dry_run:
+        if result["product"] != "unsure":
+            lead.product_interest = result["product"]
+        if result.get("name") and not lead.name:
+            lead.name = result["name"][:120]
+        lead.intent, lead.summary = intent, result["summary"]
+        lead.status = new_status
+        lead.next_followup_at = next_followup_time(lead)
+        db.session.commit()
+    newly_ready = new_status == "ready" and not was_ready
+    say(f"decision: status {old_status} -> {new_status}, "
+        f"newly_ready={newly_ready}")
+    if newly_ready and not dry_run:
         notify_owner(lead, result["summary"], "pricing" if intent == "ready_pricing" else "a demo")
 
-    if lead.followup_paused or not lead.phone or (was_ready and lead.status == "ready"):
-        reason = ("follow-ups paused for this lead" if lead.followup_paused else
+    if lead.followup_paused or not lead.phone or (was_ready and new_status == "ready"):
+        reason = ("follow-ups paused for this lead (bot stays quiet)" if lead.followup_paused else
                   "lead has no phone" if not lead.phone else "lead already ready; Fredrick is handling it")
-        log.info("reply lead=%s sender=%s outcome=ignored (%s)", lead_id, who, reason)
-        return  # Fredrick is handling this lead; the bot stays quiet
+        return "skipped", reason
     if first_contact:
         situation = "first_contact"
     elif newly_ready:
         situation = "ready"
-    elif lead.status == "closed_lost":
+    elif new_status == "closed_lost":
         situation = "not_fit"
     else:
         situation = "continue"
+    say(f"situation={situation}")
 
     if not whatsapp.is_configured():
-        log.warning("WhatsApp not connected; auto-reply to lead %s skipped", lead_id)
-        log.info("reply lead=%s sender=%s outcome=ignored (WhatsApp not configured)", lead_id, who)
-        return
-    sent_msg = None
-    if window_open(lead):
-        sent_msg = send_whatsapp(lead, text=ai.draft_reply(lead, history, situation))
-    elif first_contact and current_app.config["WHATSAPP_TEMPLATE_ACK"]:
-        sent_msg = send_whatsapp(lead, template="ack",
-                                 params=[lead.name or "there", ai.PRODUCT_LABELS[lead.product_interest]])
+        return "skipped", "WhatsApp not configured (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)"
+    cfg_ack = current_app.config["WHATSAPP_TEMPLATE_ACK"]
+    # The window is open when the lead's latest WhatsApp message is recent. In a dry run it is read-only anyway.
+    is_open = window_open(lead)
+    say(f"24h window open={is_open}, ack template={'set' if cfg_ack else 'not set'}")
+    if is_open:
+        text = ai.draft_reply(lead, history, situation)
+        say(f"draft ready ({len(text)} chars)")
+        if dry_run:
+            return "skipped", "dry run: would send free-form text (pass --send to really send)"
+        msg = send_whatsapp(lead, text=text)
+    elif first_contact and cfg_ack:
+        if dry_run:
+            return "skipped", "dry run: would send the ack template (pass --send to really send)"
+        msg = send_whatsapp(lead, template="ack", params=[lead.name or "there", ai.PRODUCT_LABELS[lead.product_interest]])
     else:
-        log.info("reply lead=%s sender=%s outcome=ignored (no open WhatsApp window and no ack template)",
-                 lead_id, who)
-        return
-    if sent_msg.status == "failed":
-        log.info("reply lead=%s sender=%s outcome=failed (%s)", lead_id, who, sent_msg.error)
-    else:
-        log.info("reply lead=%s sender=%s outcome=replied (%s)", lead_id, who, situation)
+        return "skipped", "no open WhatsApp window and not a first contact with an ack template"
+    if msg.status == "failed":
+        return "failed", f"WhatsApp send failed: {msg.error}"
+    return "replied", situation
 
 
 # --- follow-up sequence ---------------------------------------------------------------------
@@ -273,6 +316,17 @@ def send_followup(lead):
         # If the app was down and stages piled up, still leave a gap between messages.
         lead.next_followup_at = max(due, now + timedelta(hours=12)) if due else None
     db.session.commit()
+
+
+def run_unanswered(min_age=timedelta(minutes=2)):
+    """Safety net: inbound messages still unhandled after min_age (a reply thread that never ran or was killed
+    before claiming them) get the reply pipeline now."""
+    cutoff = utcnow() - min_age
+    ids = [r[0] for r in db.session.query(Message.lead_id).filter(
+        Message.direction == "inbound", Message.handled.is_(False), Message.sent_at <= cutoff).distinct()]
+    for lead_id in ids:
+        log.warning("Sweeper: lead %s has unanswered inbound messages; running the reply pipeline", lead_id)
+        handle_lead_reply(lead_id)
 
 
 def run_due_followups():
