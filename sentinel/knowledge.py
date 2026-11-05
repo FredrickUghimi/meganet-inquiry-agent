@@ -5,12 +5,12 @@ The more accurate it is, the better the replies. Keep it short and factual.
 """
 
 PRODUCT_NOTES = """\
-Company: Mega-Net Software. Founder: Fredrick. Both products are cloud software sold as monthly/annual subscriptions.
+Company: Mega-Net Software. Founder: Fredrick. Both products are cloud software.
 
 Mega-Net EHR Cloud: cloud electronic health records for clinics and hospitals.
 Mega-Net ERP Cloud: cloud ERP for businesses (operations, finance, inventory).
 
-Pricing: not quoted by the assistant. Fredrick sends exact pricing personally after learning the size of the facility or business.
+Pricing: not quoted by the assistant. Fredrick shares pricing personally after learning about the customer's needs. Never explain how pricing is determined.
 Demos: Fredrick runs them personally.
 """
 

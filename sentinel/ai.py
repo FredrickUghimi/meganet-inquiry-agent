@@ -143,21 +143,62 @@ def describe_error(exc):
     return out
 
 
+CLASSIFY_MAX_TOKENS = 2000  # generous: reasoning blocks count toward max_tokens and can starve the visible JSON
+
+
+def last_classify_info():
+    """Diagnostics of the most recent classify() on this thread, including the raw text (diagnose script only)."""
+    return getattr(_local, "classify_info", None)
+
+
+def _classify_request(lead, messages, extra=""):
+    response = _get_client().messages.create(
+        model=current_app.config["ANTHROPIC_MODEL"],
+        max_tokens=CLASSIFY_MAX_TOKENS,
+        system=_system(lead, CLASSIFY_INSTRUCTIONS + extra),
+        messages=[{"role": "user", "content": f"Conversation:\n{_transcript(messages)}"}],
+    )
+    text = _text(response)  # text blocks only; thinking and other blocks are ignored
+    usage = getattr(response, "usage", None)
+    info = {
+        "stop_reason": getattr(response, "stop_reason", None),
+        "input_tokens": getattr(usage, "input_tokens", None),
+        "output_tokens": getattr(usage, "output_tokens", None),
+        "text_len": len(text),
+        "non_text_blocks": sorted({b.type for b in response.content if b.type != "text"}),
+        "raw_text": text,
+    }
+    return text, info
+
+
+def _info_for_log(info):
+    return (f"stop_reason={info['stop_reason']} input_tokens={info['input_tokens']} "
+            f"output_tokens={info['output_tokens']} text_len={info['text_len']} "
+            f"non_text_blocks={info['non_text_blocks']} head={info['raw_text'][:120]!r}")
+
+
 def classify(lead, messages):
     """Plain text request (no tools, no tool_choice) so it works on any model."""
     model = current_app.config["ANTHROPIC_MODEL"]
+    _local.classify_info = None
+    info = None
     try:
-        response = _get_client().messages.create(
-            model=model,
-            max_tokens=400,
-            system=_system(lead, CLASSIFY_INSTRUCTIONS),
-            messages=[{"role": "user", "content": f"Conversation:\n{_transcript(messages)}"}],
-        )
-        data = parse_classification(_text(response))
+        text, info = _classify_request(lead, messages)
+        _local.classify_info = dict(info, retried=False)
+        if info["stop_reason"] == "max_tokens":
+            log.warning("claude classify hit max_tokens (model=%s): %s; retrying once, shorter", model,
+                        _info_for_log(info))
+            text, info = _classify_request(
+                lead, messages, "\nYour last answer was cut off. Answer again with the JSON object only: no "
+                "explanation, and a summary under 80 characters.")
+            _local.classify_info = dict(info, retried=True)
+        data = parse_classification(text)
     except Exception as exc:
-        log.error("claude classify FAILED (model=%s): %s", model, describe_error(exc))
+        detail = f" {_info_for_log(info)}" if info else ""
+        log.error("claude classify FAILED (model=%s): %s;%s", model, describe_error(exc), detail)
         raise
-    log.info("claude classify ok model=%s intent=%s product=%s", model, data["intent"], data["product"])
+    log.info("claude classify ok model=%s intent=%s product=%s stop_reason=%s output_tokens=%s", model,
+             data["intent"], data["product"], info["stop_reason"], info["output_tokens"])
     return data
 
 
@@ -168,8 +209,10 @@ REPLY_RULES = (
     "- Read the WHOLE conversation first. Never ask for something the lead has already told you (staff or "
     "patient numbers, their problem, their name); use what they said instead.\n"
     "- Answer the lead's latest question or request FIRST, then ask at most one or two short questions.\n"
-    "- If the lead asks about price, cost or a quote: say Fredrick shares pricing personally once he knows their "
-    "setup, and propose a short demo with him, asking for a preferred day and time. NEVER quote, estimate or hint "
+    "- If the lead asks about price, cost or a quote: say ONLY that Fredrick shares pricing personally after "
+    "learning about their needs, then offer a short demo with him and ask for a preferred day and time. NEVER "
+    "describe how pricing is determined or structured: do not mention staff count, number of users, patients, "
+    "per-facility, per-seat, tiers, plans or subscriptions in connection with price. NEVER quote, estimate or hint "
     "at any price, range or discount, and write no currency amounts.\n"
     "- If the lead asks for a demo or a call: confirm Fredrick will arrange it personally and ask for a preferred "
     "day and time.\n"
@@ -201,8 +244,8 @@ FALLBACK_REPLIES = {
                       "asking about, EHR Cloud or ERP Cloud? And roughly how big is your facility or business, "
                       "and what is the main problem you want to fix?"),
     "continue": "Thanks, noted. Can you tell me a bit more about your setup and what you want to fix first?",
-    "ready": ("Thanks. Fredrick shares pricing and runs demos personally. What day and time would suit you "
-              "for a short demo?"),
+    "ready": ("Thanks. Fredrick shares pricing personally after learning about your needs. A short demo with him "
+              "is the best next step. What day and time would suit you?"),
     "not_fit": "Understood, thanks for letting us know. If anything changes, message us any time.",
 }
 

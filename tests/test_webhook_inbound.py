@@ -487,3 +487,92 @@ def test_dry_run_trace_includes_stop_reason_and_usage(app, sent, monkeypatch):
     lines = []
     service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
     assert any("stop_reason=end_turn" in l and "output_tokens" in l for l in lines)
+
+
+# --- classify robustness: max_tokens, thinking blocks --------------------------------------------
+
+def resp(blocks, stop="end_turn", out=50):
+    r = SimpleNamespace(content=blocks, stop_reason=stop,
+                        usage=SimpleNamespace(input_tokens=900, output_tokens=out))
+    return r
+
+
+def tb(text):
+    return SimpleNamespace(type="text", text=text)
+
+
+THINKING = SimpleNamespace(type="thinking", thinking="let me think...", signature="sig")
+
+
+def classify_with(monkeypatch, responses, seen=None):
+    queue = list(responses)
+
+    def create(**kw):
+        if seen is not None:
+            seen.append(kw)
+        return queue.pop(0)
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
+
+
+def test_classify_normal_json_response(app, monkeypatch):
+    seen = []
+    classify_with(monkeypatch, [resp([tb(GOOD)])], seen)
+    out = ai.classify(Lead(product_interest="unsure"), [])
+    assert out["intent"] == "ready_demo"
+    assert seen[0]["max_tokens"] >= 1500 and len(seen) == 1
+    assert ai.last_classify_info()["raw_text"] == GOOD and ai.last_classify_info()["stop_reason"] == "end_turn"
+
+
+def test_classify_ignores_thinking_block_before_text(app, monkeypatch):
+    classify_with(monkeypatch, [resp([THINKING, tb("```json\n" + GOOD + "\n```")])])
+    assert ai.classify(Lead(product_interest="unsure"), [])["product"] == "ehr_cloud"
+    assert ai.last_classify_info()["non_text_blocks"] == ["thinking"]
+
+
+def test_classify_cut_off_by_max_tokens_is_retried_once(app, monkeypatch, caplog):
+    seen = []
+    classify_with(monkeypatch, [resp([THINKING, tb('{"intent": "exploring", "prod')], stop="max_tokens", out=2000),
+                                resp([tb(GOOD)])], seen)
+    out = ai.classify(Lead(product_interest="unsure"), [])
+    assert out["intent"] == "ready_demo" and len(seen) == 2
+    assert "cut off" in seen[1]["system"]
+    assert ai.last_classify_info()["retried"] is True
+    assert any("hit max_tokens" in r.getMessage() for r in caplog.records)
+
+
+def test_classify_cut_off_twice_fails_with_full_error_diagnostics(app, monkeypatch, caplog):
+    cut = resp([THINKING, tb('{"intent": "exploring", "prod')], stop="max_tokens", out=2000)
+    classify_with(monkeypatch, [cut, cut])
+    with pytest.raises(ai.ClassificationParseError):
+        ai.classify(Lead(product_interest="unsure"), [])
+    err = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"][-1]
+    for needle in ("stop_reason=max_tokens", "input_tokens=900", "output_tokens=2000", "text_len=",
+                   "non_text_blocks=['thinking']", '{"intent": "exploring", "prod'):
+        assert needle in err
+    assert "tok" not in err.replace("tokens", "").replace("stop", "")  # no API key / token material
+
+
+def test_raw_classify_text_not_in_production_logs_but_in_trace(app, sent, monkeypatch, caplog):
+    from sentinel import service
+    classify_with(monkeypatch, [resp([tb(GOOD.replace("ready_demo", "exploring").replace("Clinic, 12 staff", "SECRETSUMMARY"))])] * 3)
+    monkeypatch.setattr(ai, "draft_reply", lambda *a: "hello")
+    post(app, text_value(LEAD, mid="wamid.a", body="hi"))
+    caplog.clear()
+    classify_with(monkeypatch, [resp([tb(GOOD.replace("ready_demo", "exploring").replace("Clinic, 12 staff", "SECRETSUMMARY"))])])
+    lines = []
+    caplog.set_level(logging.INFO)
+    service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
+    assert any("classify raw text" in l and "SECRETSUMMARY" in l for l in lines)
+    assert any("classify stop_reason=end_turn" in l for l in lines)
+    assert "SECRETSUMMARY" not in caplog.text
+
+
+def test_pricing_rule_forbids_describing_how_price_is_set():
+    rules = ai.REPLY_RULES
+    assert "ONLY that Fredrick shares pricing personally after learning about their needs" in rules
+    for word in ("staff count", "number of users", "per-facility"):
+        assert word in rules  # listed as things NOT to mention
+    assert "size of the facility" not in ai.FALLBACK_REPLIES["ready"]
+    from sentinel.knowledge import PRODUCT_NOTES
+    assert "size of the facility" not in PRODUCT_NOTES

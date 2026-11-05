@@ -216,6 +216,7 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     say(f"first_contact={first_contact} inbound_count={inbound_count} history={len(history)}")
 
     ai_note = None
+    ai._local.classify_info = None
     try:
         result = ai.classify(lead, history)
         say(f"claude classify ok (model {model}): intent={result['intent']} product={result['product']}")
@@ -226,6 +227,12 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         say(f"claude classify FAILED (model {model}): {err}; treating as exploring")
         ai_note = f"Claude classification failed (model {model}): {err}"[:400]
         result = {"intent": "exploring", "product": "unsure", "name": None, "summary": ""}
+    cinfo = ai.last_classify_info()
+    if cinfo:  # trace only (diagnose script); raw model text never goes to the production logs
+        say(f"classify stop_reason={cinfo['stop_reason']} input_tokens={cinfo['input_tokens']} "
+            f"output_tokens={cinfo['output_tokens']} non_text_blocks={cinfo['non_text_blocks']} "
+            f"retried={cinfo['retried']}", detail=True)
+        say(f"classify raw text: {cinfo['raw_text']!r}", detail=True)
 
     latest = " ".join(m.body for m in pending)
     hint = ai.heuristic_intent(latest)
