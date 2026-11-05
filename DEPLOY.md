@@ -19,6 +19,7 @@ except `DASHBOARD_PASSWORD`.
 | `WHATSAPP_PHONE_NUMBER_ID` | ID of the business number (not the phone number) | Meta app > WhatsApp > API Setup | Blank until number is live |
 | `WHATSAPP_APP_SECRET` | Verifies webhooks really come from Meta | Meta app > App settings > Basic > App secret | Blank until number is live (inbound webhooks are rejected while blank) |
 | `OWNER_WHATSAPP_NUMBER` | Your own WhatsApp for "lead is ready" alerts, digits only with country code, e.g. `2348012345678` | Your number | Blank until number is live |
+| `OWNER_AS_LEAD` | Testing only. Messages from `OWNER_WHATSAPP_NUMBER` are ignored by design (logged as "ignored (sender is OWNER_WHATSAPP_NUMBER...)"). Set to `1` to test the bot from your own phone; set back to `0` afterwards | You | `0` (preset) |
 | `DISPLAY_TZ` | Timezone for dates (preset `Africa/Lagos`) | Preset | Already set |
 | `WHATSAPP_TEMPLATE_ACK`, `WHATSAPP_TEMPLATE_ESCALATION` | Approved template names (preset) | Preset | Already set |
 
@@ -53,3 +54,12 @@ If Render adds a suffix, use the exact URL shown at the top of the service page.
 
 - **Web service: Starter or higher (always on).** Free instances sleep after idle. A sleeping service misses Meta webhooks and its in-process follow-up scheduler stops. The service must also run exactly **one** worker (already set), or follow-ups would be sent twice.
 - **Postgres: paid (`basic-256mb`).** Render's free database expires after about 30 days and is deleted. Leads must not disappear.
+
+## Troubleshooting: "messages arrive but nothing happens"
+
+Every `POST /webhook` event writes one INFO log line: `webhook event kind=... sender=234*******78 phone_number_id=... outcome=...`, and the auto-reply step writes a `reply lead=... outcome=...` line. Search the Render logs for `webhook event` and read the `outcome`. Common reasons:
+
+- `ignored (sender is OWNER_WHATSAPP_NUMBER...)`: you are texting from your own owner number. Use another phone, or temporarily set `OWNER_AS_LEAD=1`.
+- `ignored (phone_number_id is not ours)`: the message was for a different number than `WHATSAPP_PHONE_NUMBER_ID` (also what Meta's dashboard "Test" button sends).
+- `ignored (duplicate delivery ...)`: Meta retried a message already stored.
+- `reply ... ignored (lead is closed_lost ...)` / `(follow-ups paused ...)` / `(lead already ready ...)`: the lead exists but the bot is deliberately quiet.

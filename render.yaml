@@ -34,6 +34,9 @@ services:
         sync: false
       - key: OWNER_WHATSAPP_NUMBER
         sync: false
+      # Testing only: set to 1 to let your own (owner) number create a lead. Leave 0 in normal use.
+      - key: OWNER_AS_LEAD
+        value: "0"
       - key: DISPLAY_TZ
         value: Africa/Lagos
       # On by default (names must match the approved templates; see README)

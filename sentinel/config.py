@@ -64,6 +64,8 @@ def load_config():
         "WHATSAPP_TEMPLATE_ESCALATION": _env("WHATSAPP_TEMPLATE_ESCALATION", "meganet_lead_alert"),
         # Escalation target (digits only, with country code)
         "OWNER_WHATSAPP_NUMBER": "".join(c for c in (_env("OWNER_WHATSAPP_NUMBER") or "") if c.isdigit()) or None,
+        # Testing only: treat messages from the owner number as a normal lead instead of ignoring them.
+        "OWNER_AS_LEAD": _flag("OWNER_AS_LEAD", False),
         # Scheduler
         "SCHEDULER_ENABLED": _flag("SCHEDULER_ENABLED", True),
         "FOLLOWUP_CHECK_MINUTES": int(_env("FOLLOWUP_CHECK_MINUTES", "5")),

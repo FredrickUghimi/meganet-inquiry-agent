@@ -21,6 +21,16 @@ def normalize_phone(raw):
     return re.sub(r"\D", "", raw or "") or None
 
 
+def mask_phone(raw):
+    """For logs: keep the country prefix and last 2 digits, mask the middle (234*******78)."""
+    digits = normalize_phone(raw)
+    if not digits:
+        return "-"
+    if len(digits) <= 5:
+        return "*" * len(digits)
+    return digits[:3] + "*" * (len(digits) - 5) + digits[-2:]
+
+
 # --- intake ---------------------------------------------------------------------------------
 
 def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp"):
@@ -144,17 +154,22 @@ def handle_lead_reply(lead_id):
     Multiple rapid messages are claimed together and answered once."""
     lead = db.session.get(Lead, lead_id)
     if lead is None:
+        log.info("reply lead=%s outcome=ignored (lead not found)", lead_id)
         return
+    who = mask_phone(lead.phone)
     pending = Message.query.filter_by(lead_id=lead_id, direction="inbound", handled=False).all()
     if not pending:
+        log.info("reply lead=%s sender=%s outcome=ignored (no unhandled messages)", lead_id, who)
         return
     claimed = (Message.query.filter(Message.id.in_([m.id for m in pending]), Message.handled.is_(False))
                .update({"handled": True}, synchronize_session=False))
     db.session.commit()
     if not claimed:
-        return  # another worker got there first
+        log.info("reply lead=%s sender=%s outcome=ignored (another worker claimed the messages)", lead_id, who)
+        return
 
     if lead.status in ("closed_won", "closed_lost"):
+        log.info("reply lead=%s sender=%s outcome=ignored (lead is %s; no auto-reply)", lead_id, who, lead.status)
         return  # logged only; Fredrick decides whether to reopen
 
     first_contact = not Message.query.filter(
@@ -188,6 +203,9 @@ def handle_lead_reply(lead_id):
         notify_owner(lead, result["summary"], "pricing" if intent == "ready_pricing" else "a demo")
 
     if lead.followup_paused or not lead.phone or (was_ready and lead.status == "ready"):
+        reason = ("follow-ups paused for this lead" if lead.followup_paused else
+                  "lead has no phone" if not lead.phone else "lead already ready; Fredrick is handling it")
+        log.info("reply lead=%s sender=%s outcome=ignored (%s)", lead_id, who, reason)
         return  # Fredrick is handling this lead; the bot stays quiet
     if first_contact:
         situation = "first_contact"
@@ -200,13 +218,22 @@ def handle_lead_reply(lead_id):
 
     if not whatsapp.is_configured():
         log.warning("WhatsApp not connected; auto-reply to lead %s skipped", lead_id)
+        log.info("reply lead=%s sender=%s outcome=ignored (WhatsApp not configured)", lead_id, who)
         return
+    sent_msg = None
     if window_open(lead):
-        send_whatsapp(lead, text=ai.draft_reply(lead, history, situation))
+        sent_msg = send_whatsapp(lead, text=ai.draft_reply(lead, history, situation))
     elif first_contact and current_app.config["WHATSAPP_TEMPLATE_ACK"]:
-        send_whatsapp(lead, template="ack", params=[lead.name or "there", ai.PRODUCT_LABELS[lead.product_interest]])
+        sent_msg = send_whatsapp(lead, template="ack",
+                                 params=[lead.name or "there", ai.PRODUCT_LABELS[lead.product_interest]])
     else:
-        log.info("Lead %s has no open WhatsApp window and no ack template; no auto-reply sent", lead_id)
+        log.info("reply lead=%s sender=%s outcome=ignored (no open WhatsApp window and no ack template)",
+                 lead_id, who)
+        return
+    if sent_msg.status == "failed":
+        log.info("reply lead=%s sender=%s outcome=failed (%s)", lead_id, who, sent_msg.error)
+    else:
+        log.info("reply lead=%s sender=%s outcome=replied (%s)", lead_id, who, situation)
 
 
 # --- follow-up sequence ---------------------------------------------------------------------

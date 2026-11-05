@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, current_app, request
 
 from . import service
-from .models import Message, db
+from .models import Lead, Message, db
 from .scheduler import run_async
 
 log = logging.getLogger(__name__)
@@ -55,32 +55,78 @@ def verify():
     return "Forbidden", 403
 
 
+def _log_event(kind, sender, phone_id, outcome):
+    """One INFO line per webhook event. Never includes tokens, secrets or message text."""
+    log.info("webhook event kind=%s sender=%s phone_number_id=%s outcome=%s",
+             kind, service.mask_phone(sender), phone_id or "-", outcome)
+
+
+def _ids_match(seen, configured):
+    return str(seen).strip() == str(configured).strip()
+
+
 @bp.post("/webhook")
 def receive():
     raw = request.get_data()
     if not _signature_ok(raw):
+        log.warning("webhook rejected: invalid or missing X-Hub-Signature-256 (403)")
         return "Invalid signature", 403
-    payload = request.get_json(silent=True) or {}
-    owner = current_app.config["OWNER_WHATSAPP_NUMBER"]
-    to_handle = set()
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        log.info("webhook event kind=other sender=- phone_number_id=- outcome=ignored (body is not a JSON object)")
+        return "OK", 200
+    cfg = current_app.config
+    owner = cfg["OWNER_WHATSAPP_NUMBER"]
+    configured_id = cfg.get("WHATSAPP_PHONE_NUMBER_ID")
+    to_handle = {}
+    seen_any = False
 
-    for entry in payload.get("entry", []):
-        for change in entry.get("changes", []):
-            value = change.get("value", {})
-            names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in value.get("contacts", [])}
+    for entry in payload.get("entry") or []:
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            phone_id = (value.get("metadata") or {}).get("phone_number_id")
+            names = {c.get("wa_id"): (c.get("profile") or {}).get("name") for c in value.get("contacts") or []}
+            id_mismatch = bool(configured_id and phone_id is not None and not _ids_match(phone_id, configured_id))
 
-            for m in value.get("messages", []):
-                phone = service.normalize_phone(m.get("from"))
-                if not phone or phone == owner:
-                    continue  # Fredrick texting the business number is not a lead
-                lead = service.find_or_create_lead(phone=phone, name=names.get(m.get("from")), source="whatsapp")
-                at = datetime.fromtimestamp(int(m["timestamp"]), timezone.utc).replace(tzinfo=None) \
-                    if m.get("timestamp") else None
-                if service.record_inbound(lead, _body_of(m), "whatsapp", external_id=m.get("id"), at=at):
-                    to_handle.add(lead.id)
+            for m in value.get("messages") or []:
+                seen_any = True
+                sender = m.get("from")
+                try:
+                    phone = service.normalize_phone(sender)
+                    if not phone:
+                        _log_event("message", sender, phone_id, "ignored (no sender number)")
+                    elif id_mismatch:
+                        log.warning("webhook message addressed to phone_number_id=%s but this service is "
+                                    "WHATSAPP_PHONE_NUMBER_ID=%s", phone_id, configured_id)
+                        _log_event("message", phone, phone_id, "ignored (phone_number_id is not ours)")
+                    elif phone == owner and not cfg.get("OWNER_AS_LEAD"):
+                        _log_event("message", phone, phone_id,
+                                   "ignored (sender is OWNER_WHATSAPP_NUMBER; set OWNER_AS_LEAD=1 to test)")
+                    elif m.get("type") == "reaction":
+                        _log_event("message", phone, phone_id, "ignored (reaction, not a message)")
+                    else:
+                        existed = Lead.query.filter_by(phone=phone).first() is not None
+                        lead = service.find_or_create_lead(phone=phone, name=names.get(sender), source="whatsapp")
+                        at = datetime.fromtimestamp(int(m["timestamp"]), timezone.utc).replace(tzinfo=None) \
+                            if m.get("timestamp") else None
+                        if service.record_inbound(lead, _body_of(m), "whatsapp", external_id=m.get("id"), at=at):
+                            to_handle[lead.id] = (phone, phone_id)
+                            _log_event("message", phone, phone_id,
+                                       f"{'updated' if existed else 'created'} lead {lead.id}")
+                        else:
+                            _log_event("message", phone, phone_id, f"ignored (duplicate delivery of {m.get('id')})")
+                except Exception:
+                    db.session.rollback()
+                    log.exception("webhook message from %s failed", service.mask_phone(sender))
+                    _log_event("message", sender, phone_id, "failed (exception, see traceback above)")
+                    raise
 
-            for s in value.get("statuses", []):
-                if s.get("status") == "failed":
+            for s in value.get("statuses") or []:
+                seen_any = True
+                recipient = s.get("recipient_id")
+                status = s.get("status")
+                outcome = f"ignored (delivery status '{status}')"
+                if status == "failed":
                     msg = Message.query.filter_by(external_id=s.get("id")).first()
                     if msg:
                         err = (s.get("errors") or [{}])[0]
@@ -88,6 +134,13 @@ def receive():
                         msg.error = f"{err.get('title') or err.get('message')} (code {err.get('code')})"[:500]
                         db.session.commit()
                         log.warning("WhatsApp delivery failed for message %s: %s", msg.id, msg.error)
+                        outcome = f"failed (delivery failure recorded on message {msg.id}, code {err.get('code')})"
+                    else:
+                        outcome = "ignored (failed status for an unknown message id)"
+                _log_event("status", recipient, phone_id, outcome)
+
+    if not seen_any:
+        log.info("webhook event kind=other sender=- phone_number_id=- outcome=ignored (no messages or statuses)")
 
     for lead_id in to_handle:
         run_async(current_app._get_current_object(), service.handle_lead_reply, lead_id)
