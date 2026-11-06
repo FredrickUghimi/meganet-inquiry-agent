@@ -77,7 +77,8 @@ def test_dashboard_reply_outside_window_refused_and_form_disabled(app, sent, cla
 
 def test_dashboard_reply_failure_shows_meta_error_and_changes_nothing(app, sent, claude, monkeypatch):
     lead = make_lead(app, sent, claude)
-    lead.status = "ready"  # a waiting prospect: only Fredrick can answer
+    lead.status = "ready"
+    app.config["BOT_ANSWERS_AFTER_READY"] = False  # old behaviour: a ready lead is a waiting prospect
     db.session.commit()
 
     def boom(to, body):

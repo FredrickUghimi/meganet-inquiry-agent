@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from flask import (Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for)
 
 from . import service, whatsapp
-from .models import Lead, Message, db, utcnow
+from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
 from .scheduler import run_async
 
 bp = Blueprint("dashboard", __name__)
@@ -108,6 +108,18 @@ def leads():
     return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status)
 
 
+@bp.get("/settings")
+@login_required
+def settings():
+    """Read-only view of the business facts the bot uses and how conversations are handled. No secrets."""
+    from . import business_facts as bf
+    cfg = current_app.config
+    facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.FACTS]
+    modes = [("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
+             ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"])]
+    return render_template("settings.html", facts=facts, modes=modes)
+
+
 @bp.get("/leads/<int:lead_id>")
 @login_required
 def lead_detail(lead_id):
@@ -121,7 +133,9 @@ def lead_detail(lead_id):
     if quoted:
         body = " ".join(quoted.body.split())
         quoted_text = body[:80] + ("..." if len(body) > 80 else "")
-    return render_template("lead.html", lead=lead, window_until=service.window_closes_at(lead),
+    return render_template("lead.html", lead=lead, demos=DemoRequest.query.filter_by(lead_id=lead.id).order_by(DemoRequest.id).all(),
+                           questions=OpenQuestion.query.filter_by(lead_id=lead.id).order_by(OpenQuestion.id).all(),
+                           human_handled=service.human_handled(lead), window_until=service.window_closes_at(lead),
                            waiting_ids=service.waiting_message_ids(lead), quoted=quoted, quoted_text=quoted_text)
 
 
@@ -159,6 +173,7 @@ def lead_action(lead_id):
         lead.next_followup_at = None
     elif action in ("resume", "reopen"):
         lead.followup_paused = False
+        lead.handback_at = now  # the bot answers again, even if Fredrick wrote within the takeover window
         lead.followup_failures = 0
         if action == "reopen" or lead.status == "cold":
             lead.status, lead.followup_stage = "engaged", 0

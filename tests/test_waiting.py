@@ -25,6 +25,7 @@ def make_waiting(app, sent, claude, how="paused"):
         lead.followup_paused = True
     elif how == "ready":
         lead.status = "ready"
+        app.config["BOT_ANSWERS_AFTER_READY"] = False  # old behaviour for these tests
     lead.last_owner_alert_at = lead.last_hold_reply_at = None
     db.session.commit()
     sent.clear()
