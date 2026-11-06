@@ -55,7 +55,9 @@ def test_holding_reply_sent_once_then_throttled(app, sent, claude, caplog, how):
     lead.last_hold_reply_at = utcnow() - timedelta(hours=5)
     db.session.commit()
     say(app, "wamid.c", "Hello???")
-    assert len(holding(sent)) == 2
+    to_lead = [s[2] for s in sent if s[1] == LEAD]
+    assert len(to_lead) == 2 and to_lead[1] != to_lead[0]  # the repeat guard rephrased the second holding reply
+    assert len(holding(sent)) == 1
 
 
 def test_holding_reply_has_no_price_or_questions(app, sent, claude):

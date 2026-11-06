@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from sentinel import ai, business_facts, demo, service
 from sentinel.models import DemoRequest, Lead, Message, db, utcnow
+from replay import Chat, cl, turn  # noqa: F401
 from test_webhook_inbound import LEAD, OWNER, post, text_value
 
 STAFF = "2347000000001"
@@ -119,50 +120,29 @@ def test_outside_business_hours_note_says_when_team_replies(app):
     assert "OUTSIDE business hours" in demo.hours_status(datetime(2026, 11, 7, 12, 0))
 
 
-# --- video-first flow ----------------------------------------------------------------------------
+# --- demo requests, staff alerts and commands (conversations: see tests/transcripts) --------------------------------------
 
-def test_demo_request_sends_video_then_asks_about_personalised_demo(app, sent, claude):
-    start_video(app, sent, claude)
-    reply = to_lead(sent)[0]
-    assert EHR_LINK in reply and ERP_LINK not in reply
-    assert "introduces Mega-Net EHR Cloud, our cloud electronic health records system for clinics and hospitals" in reply
-    assert "Would you also like a personalised demonstration with our team?" in reply
-    assert Lead.query.one().demo_state == "offered" and DemoRequest.query.count() == 0
-
-
-def test_unknown_product_gets_both_videos(app, sent, claude):
-    claude["product"] = "unsure"
-    start_video(app, sent, claude, body="Can I see a demo?")
-    reply = to_lead(sent)[0]
-    assert EHR_LINK in reply and ERP_LINK in reply
+def pencil(chat, cl, name="Amaka Obi", org="Grace Clinic"):
+    """Walk a customer through the soft demo flow with structured drafts; returns the tentative DemoRequest."""
+    slot = demo.next_slots(utcnow(), 1)[0]
+    when = f"{slot:%A} {slot.day} {slot:%B} 10:00"
+    chat.say("Can I get a demo of EHR Cloud?", turn("Sure. This video introduces Mega-Net EHR Cloud. " + OFFER_Q, "wants_demo",
+                                                     share_video="ehr_cloud", asked_personalised_offer=True))
+    chat.say("yes", turn("Great. Your organisation and channel?", "accepted_personalised"))
+    chat.say(f"{org}, Google Meet", turn("Thanks. Does that Wednesday suit you?", "gave_details",
+                                         fields={"organisation": org, "channel": "meet", "name": name}))
+    chat.say("yes", turn("Noted.", "proposed_time", proposed_time=when))
+    return DemoRequest.query.filter_by(lead_id=chat.lead.id, status="tentative").one()
 
 
-def test_yes_collects_only_missing_details_then_pencils_next_wednesday(app, sent, claude):
-    to_collecting(app, sent, claude)
-    claude["demo"] = {"organisation": "Grace Clinic"}
-    say(app, "Grace Clinic", "wamid.d3")
-    assert "please send your preferred channel" in to_lead(sent)[-1] and "your organisation" not in to_lead(sent)[-1]
-    sent.clear()
-    claude["demo"] = {"organisation": "Grace Clinic", "channel": "meet"}
-    say(app, "Google Meet", "wamid.d4")
-    req = DemoRequest.query.one()
-    assert req.status == "tentative" and req.start_at.weekday() == 2 and (req.start_at.hour, req.start_at.minute) == (10, 0)
-    assert (req.contact_name, req.organisation, req.channel, req.contact_phone) == ("Amaka", "Grace Clinic", "Google Meet", LEAD)
-    reply = to_lead(sent)[0]
-    assert "pencilled in" in reply and "not confirmed yet" in reply and "Wednesdays at 10:00 AM WAT" in reply
-    assert business_facts.DEMO_CONFIRMATION_PROMISE in reply and "is confirmed" not in reply
-    alert = to(sent, OWNER)[0]
-    assert f"confirm {req.id}" in alert and f"decline {req.id} [new time]" in alert and "Grace Clinic" in alert
-    assert Lead.query.one().demo_state is None
+OFFER_Q = "Would you also like a personalised demonstration with our team?"
 
 
-def test_staff_are_alerted_and_can_confirm(app, sent, claude):
+def test_staff_are_alerted_and_can_confirm(app, sent, cl):
     app.config["STAFF_WHATSAPP_NUMBERS"] = (STAFF,)
-    claude["demo"] = {"organisation": "Grace Clinic", "channel": "whatsapp"}
-    to_collecting(app, sent, claude)
-    req = DemoRequest.query.one()
+    chat = Chat(app, sent, cl)
+    req = pencil(chat, cl)
     assert any(f"confirm {req.id}" in t for t in to(sent, STAFF))
-    assert req.status == "tentative"
     sent.clear()
     say(app, f"confirm {req.id}", "wamid.s1", sender=STAFF)
     req = DemoRequest.query.one()
@@ -173,63 +153,9 @@ def test_staff_are_alerted_and_can_confirm(app, sent, claude):
     assert sent == []
 
 
-def test_tuesday_request_is_redirected_not_pencilled(app, sent, claude):
-    start_video(app, sent, claude, body="Can I book a demo on Tuesday at 10am?")
-    reply = to_lead(sent)[0]
-    assert "Tuesday" in reply and "is not a demo day" in reply and "Live demos are held on Wednesdays at 10:00 AM WAT" in reply
-    first, second = demo.next_slots(utcnow(), 2)
-    assert demo.fmt(first) in reply and demo.fmt(second) in reply
-    assert DemoRequest.query.filter(DemoRequest.status.in_(("tentative", "confirmed"))).count() == 0
-
-
-def test_direct_to_team_skips_video_and_redirect_then_choice_pencils(app, sent, claude):
-    claude["demo"] = {"organisation": "Grace Clinic", "channel": "whatsapp"}
-    claude["intent"] = "exploring"
-    say(app, "I would rather speak to your team about a demo. Tuesday 10am?", "wamid.t1")
-    reply = to_lead(sent)[0]
-    assert EHR_LINK not in reply and ERP_LINK not in reply
-    assert "Live demos are held on Wednesdays at 10:00 AM WAT" in reply
-    assert Lead.query.one().demo_state == "choosing" and DemoRequest.query.filter_by(status="tentative").count() == 0
-    sent.clear()
-    first, second = demo.next_slots(utcnow(), 2)
-    say(app, "the second one please", "wamid.t2")
-    req = DemoRequest.query.filter_by(status="tentative").one()
-    assert req.start_at == second and "not confirmed yet" in to_lead(sent)[0]
-
-
-def test_direct_to_team_asks_for_missing_details_first(app, sent, claude):
-    claude["intent"] = "exploring"
-    say(app, "I prefer to talk to someone on your team, can we book a demo?", "wamid.t1")
-    assert "your organisation" in to_lead(sent)[0] and "preferred channel" in to_lead(sent)[0]
-    assert EHR_LINK not in to_lead(sent)[0]
-
-
-def test_declining_the_personalised_demo_ends_the_flow(app, sent, claude):
-    start_video(app, sent, claude)
-    sent.clear()
-    say(app, "No thanks, the video is enough", "wamid.d2")
-    assert "No problem" in to_lead(sent)[0] and Lead.query.one().demo_state is None
-
-
-def test_same_video_not_sent_twice_within_24_hours(app, sent, claude):
-    start_video(app, sent, claude)
-    say(app, "No thanks", "wamid.d2")
-    sent.clear()
-    say(app, "Actually can I get that demo again?", "wamid.d3")
-    reply = to_lead(sent)[0]
-    assert EHR_LINK not in reply and "shared the demo video with you earlier" in reply
-    for m in Message.query.filter(Message.body.contains(EHR_LINK)):  # after 24 hours it is allowed again
-        m.sent_at = utcnow() - timedelta(hours=25)
-    db.session.commit()
-    sent.clear()
-    say(app, "Please send the demo video again", "wamid.d4")
-    assert any(EHR_LINK in t for t in to_lead(sent))
-
-
-def test_confirm_decline_and_clash(app, sent, claude):
-    claude["demo"] = {"organisation": "Grace Clinic", "channel": "meet"}
-    to_collecting(app, sent, claude)
-    req = DemoRequest.query.one()
+def test_confirm_decline_and_bad_ids(app, sent, cl):
+    chat = Chat(app, sent, cl)
+    req = pencil(chat, cl)
     sent.clear()
     say(app, f"decline {req.id} next wednesday", "wamid.o1", sender=OWNER)
     rows = DemoRequest.query.order_by(DemoRequest.id).all()
@@ -292,10 +218,10 @@ def test_parse_classification_existing_client_flag():
 
 # --- dashboard -----------------------------------------------------------------------------------
 
-def test_demos_page_and_lead_page_show_collected_fields(app, sent, claude):
-    claude["demo"] = {"organisation": "Grace Clinic", "channel": "meet"}
-    to_collecting(app, sent, claude)
-    lead = Lead.query.one()
+def test_demos_page_and_lead_page_show_collected_fields(app, sent, cl):
+    chat = Chat(app, sent, cl)
+    pencil(chat, cl)
+    lead = chat.lead
     c = client(app)
     for url in ("/demos", f"/leads/{lead.id}"):
         html = c.get(url).data.decode()

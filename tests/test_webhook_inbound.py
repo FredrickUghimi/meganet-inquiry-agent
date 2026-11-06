@@ -331,7 +331,8 @@ def test_successful_classification_clears_note_and_can_make_lead_ready(app, sent
                 raise make_400()
             return text_response("```json\n" + GOOD + "\n```")
         calls["d"] = calls.get("d", 0) + 1
-        return text_response(f"Fredrick will call you. Take {calls['d']}.")
+        return text_response(["Thanks for getting in touch about EHR Cloud for your clinic today.",
+                              "Fredrick will call you to arrange a time that suits both of you."][min(calls["d"], 2) - 1])
 
     monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
     post(app, text_value(LEAD, mid="wamid.a"))
@@ -350,7 +351,8 @@ def test_dry_run_trace_shows_classification_and_draft_text(app, sent, monkeypatc
         if "ONE JSON object" in kw["system"]:
             return text_response(GOOD.replace("ready_demo", "exploring"))
         n["i"] += 1
-        return text_response(f"Hello from Mega-Net {n['i']}")  # distinct each call: no repeat blocking
+        return text_response(["Hello from Mega-Net, thanks for writing about EHR Cloud.",
+                              "We help clinics keep patient records in one safe place online."][min(n["i"], 2) - 1])
 
     monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
     post(app, text_value(LEAD, mid="wamid.a"))
@@ -358,7 +360,7 @@ def test_dry_run_trace_shows_classification_and_draft_text(app, sent, monkeypatc
     lines = []
     service.handle_lead_reply(Lead.query.one().id, retry=True, dry_run=True, trace=lines.append)
     joined = "\n".join(lines)
-    assert "intent=exploring" in joined and "Hello from Mega-Net" in joined and sent == []
+    assert "intent=exploring" in joined and "keep patient records in one safe place" in joined and sent == []
 
 
 # --- reply quality ------------------------------------------------------------------------------
@@ -449,7 +451,7 @@ def test_reply_that_quotes_a_price_is_replaced_with_safe_text(app, monkeypatch, 
     scripted_client(monkeypatch, [("It costs ₦500,000 per month. Want a demo?", "end_turn")] * 2, classify_text=GOOD)
     text = ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
     assert text == ai.FALLBACK_REPLIES["ready"] and "₦" not in text
-    assert any("price or currency" in r.getMessage() for r in caplog.records)
+    assert any("failed a guard (price)" in r.getMessage() for r in caplog.records)
 
 
 def test_history_sent_to_claude_has_earlier_answers_in_order(app, sent, monkeypatch):
@@ -478,13 +480,13 @@ def test_fallback_path_logs_warning_and_adds_note(app, sent, monkeypatch, caplog
     db.session.expire_all()  # the reply job commits from its own session
     lead = Lead.query.one()
     assert sent[-1][2] == ai.FALLBACK_REPLIES["first_contact"]
-    assert "canned fallback" in lead.ai_note and "BadRequestError http=400" in lead.ai_note
+    assert "fixed fallback" in lead.ai_note and "BadRequestError http=400" in lead.ai_note
     warns = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any("draft_reply FAILED" in w and "BadRequestError http=400" in w for w in warns)
     c = app.test_client()
     with c.session_transaction() as sess:
         sess["auth"], sess["csrf"] = True, "t"
-    assert b"canned fallback" in c.get(f"/leads/{lead.id}").data
+    assert b"fixed fallback" in c.get(f"/leads/{lead.id}").data
 
 
 def test_dry_run_trace_includes_stop_reason_and_usage(app, sent, monkeypatch):

@@ -6,6 +6,7 @@ import pytest
 
 from sentinel import ai, business_facts, demo, knowledge, service
 from sentinel.models import DemoRequest, Lead, db, utcnow
+from replay import Chat, cl, turn  # noqa: F401
 from test_webhook_inbound import LEAD, OWNER, post, text_value
 
 STAFF = "2347000000001"
@@ -28,28 +29,31 @@ def client(app):
     return c
 
 
-def pencil_for(app, sent, claude, sender, tag):
-    claude["intent"] = "exploring"
-    claude["demo"] = {"organisation": "Org " + tag, "channel": "meet"}
-    say(app, "Can I get a demo of EHR Cloud?", f"wamid.{tag}1", sender)
-    say(app, "Yes please", f"wamid.{tag}2", sender)
+def pencil_for(app, sent, cl, sender, tag):
+    """A customer pencils in the next Wednesday through the soft demo flow (structured drafts)."""
+    chat = Chat(app, sent, cl, sender)
+    slot = demo.next_slots(utcnow(), 1)[0]
+    chat.say("Can I get a demo of EHR Cloud?", turn("Sure.", "wants_demo", share_video="ehr_cloud"))
+    chat.say("yes", turn("Great. Organisation and channel?", "accepted_personalised"))
+    chat.say(f"Org {tag}, Google Meet", turn("Thanks.", "gave_details", fields={"organisation": "Org " + tag, "channel": "meet"}))
+    chat.say("that Wednesday is fine", turn("Noted.", "proposed_time", proposed_time=f"{slot:%A} {slot.day} {slot:%B} 10:00"))
     return DemoRequest.query.filter_by(status="tentative").order_by(DemoRequest.id.desc()).first()
 
 
 # --- 1. capacity: only confirmed demos fill a Wednesday ------------------------------------------
 
-def test_tentative_requests_do_not_block_each_other_or_the_slot(app, sent, claude):
-    a = pencil_for(app, sent, claude, LEAD, "a")
-    b = pencil_for(app, sent, claude, OTHER, "b")
+def test_tentative_requests_do_not_block_each_other_or_the_slot(app, sent, cl):
+    a = pencil_for(app, sent, cl, LEAD, "a")
+    b = pencil_for(app, sent, cl, OTHER, "b")
     assert a.start_at == b.start_at and a.id != b.id  # same Wednesday, both pencilled
     assert demo.validate(a.start_at, utcnow(), lead_id=999)[0] is True  # still bookable by a third lead
     assert a.start_at in demo.next_slots(utcnow(), 2)
 
 
-def test_confirm_refused_when_wednesday_full_and_decline_works(app, sent, claude):
+def test_confirm_refused_when_wednesday_full_and_decline_works(app, sent, cl):
     app.config["STAFF_WHATSAPP_NUMBERS"] = (STAFF,)
-    a = pencil_for(app, sent, claude, LEAD, "a")
-    b = pencil_for(app, sent, claude, OTHER, "b")
+    a = pencil_for(app, sent, cl, LEAD, "a")
+    b = pencil_for(app, sent, cl, OTHER, "b")
     sent.clear()
     say(app, f"confirm {a.id}", "wamid.c1", OWNER)
     assert DemoRequest.query.get(a.id).status == "confirmed"
@@ -68,9 +72,9 @@ def test_confirm_refused_when_wednesday_full_and_decline_works(app, sent, claude
     assert demo.fmt(a.start_at) not in offered  # offered other Wednesdays, not the full one
 
 
-def test_demos_page_groups_tentative_per_wednesday(app, sent, claude):
-    a = pencil_for(app, sent, claude, LEAD, "a")
-    pencil_for(app, sent, claude, OTHER, "b")
+def test_demos_page_groups_tentative_per_wednesday(app, sent, cl):
+    a = pencil_for(app, sent, cl, LEAD, "a")
+    pencil_for(app, sent, cl, OTHER, "b")
     html = client(app).get("/demos").data.decode()
     assert "By Wednesday" in html and "confirmed 0/1" in html and "tentative 2" in html
     assert f"#{a.id}" in html

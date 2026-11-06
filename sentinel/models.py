@@ -38,7 +38,10 @@ class Lead(db.Model):
     menu_sent_at = db.Column(db.DateTime)  # last first-contact tap menu (6h no-repeat rule)
     awaiting_choice = db.Column(db.Boolean, nullable=False, default=False)  # menu sent, no choice yet
     needs_owner = db.Column(db.Boolean, nullable=False, default=False)  # chose "Something else": Fredrick must answer
-    demo_state = db.Column(db.String(12))  # demo workflow: offered / collecting / choosing; null = not in the workflow
+    demo_state = db.Column(db.String(12))  # personalised-demo offer: asked / accepted / declined; null = never asked
+    demo_offer_asked_at = db.Column(db.DateTime)  # when the bot last asked the personalised-demo question
+    demo_offer_open = db.Column(db.Boolean, nullable=False, default=False)  # asked, and no answer seen yet
+    demo_offer_ignored = db.Column(db.Integer, nullable=False, default=0)  # asks the customer did not answer
     is_existing_client = db.Column(db.Boolean, nullable=False, default=False)  # already uses Mega-Net: support, not sales
     upgrade_enquiry = db.Column(db.Boolean, nullable=False, default=False)  # existing client whose latest message is a sales enquiry
     existing_alerted_at = db.Column(db.DateTime)  # owner told once that this lead is an existing client

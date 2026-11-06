@@ -1,6 +1,10 @@
 import itertools
+import os
+import sys
 
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "transcripts"))
 
 from sentinel import ai, create_app, whatsapp
 from sentinel.models import db
@@ -25,8 +29,34 @@ def claude(monkeypatch):
     state = {"intent": "exploring", "product": "ehr_cloud", "name": None, "summary": "Clinic, 12 staff."}
     monkeypatch.setattr(ai, "classify", lambda lead, msgs: dict(state))
     monkeypatch.setattr(ai, "draft_reply", lambda lead, msgs, situation: f"reply:{situation}")
-    state["demo"] = {}  # what the lead has told us for a personalised demo: name / organisation / phone / channel
-    monkeypatch.setattr(ai, "extract_demo_details", lambda lead, msgs: dict(state["demo"]))
+    state["script"] = []  # structured turns, consumed one per drafted reply: dicts like {"reply": ..., "demo_signal": ...}
+    state["calls"] = []  # every draft_turn call: {"situation", "context", "structured"}
+    fixed_purpose = ("holding", "support_route", "other_choice")  # default mock: these use their fixed fallback text
+
+    def default_turn(lead, msgs, situation, fallback_text):
+        if situation in fixed_purpose:
+            return dict(ai.blank_turn(fallback_text or ai.FALLBACK_REPLIES[situation]), fallback=True,
+                        error="mock: fixed-purpose draft")
+        return dict(ai.blank_turn(ai.draft_reply(lead, msgs, situation)), fallback=False, error=None)
+
+    def scripted_turn(lead, msgs, situation, context="", fallback_text=None, structured=True):
+        state["calls"].append({"situation": situation, "context": context, "structured": structured,
+                               "lead_id": getattr(lead, "id", None)})
+        if state["script"]:
+            item = dict(state["script"].pop(0))
+            base = ai.blank_turn(item.pop("reply", "ok"))
+            fields = dict(base["fields"], **item.pop("fields", {}))
+            return dict(base, **item, fields=fields, fallback=False, error=None)
+        return default_turn(lead, msgs, situation, fallback_text)
+
+    monkeypatch.setattr(ai, "draft_turn", scripted_turn)
+    regen = {"n": 0}
+
+    def fake_regen(lead, msgs, original):
+        regen["n"] += 1
+        return f"regenerated reply {regen['n']} about your latest message"
+
+    monkeypatch.setattr(ai, "regenerate_message", fake_regen)
     monkeypatch.setattr(ai, "draft_followup_line", lambda lead, msgs, stage, prev: f"line{stage}")
     return state
 

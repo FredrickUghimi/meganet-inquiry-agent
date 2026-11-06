@@ -26,10 +26,6 @@ _PREFERS_TEAM = re.compile(
     r"\b(speak|talk|chat|call|meet)\b[^.?!]{0,40}\b(team|someone|somebody|person|human|fredrick|representative|"
     r"member|staff|sales)\b|\b(prefer|rather|instead)\b[^.?!]{0,40}\b(speak|talk|call|person|team)\b|"
     r"\b(without|skip|no need for|don'?t need)\b[^.?!]{0,20}\bvideo\b", re.I)
-_YES = re.compile(r"^\W*(yes|yeah|yep|yup|sure|ok|okay|definitely|absolutely|of course|i would|i'd like|"
-                  r"why not|go ahead|interested|sounds good)\b", re.I)
-_NO = re.compile(r"^\W*(no|nope|nah|not now|not really|no thanks|no thank you|maybe later|later)\b", re.I)
-_PHONE = re.compile(r"(?<![\w])(\+?\d[\d\s\-]{8,16}\d)(?![\w])")
 
 
 def tz():
@@ -233,32 +229,6 @@ def redirect_text(now_utc, lead_id=None, asked=None):
 
 def prefers_team(text):
     return bool(_PREFERS_TEAM.search(text or ""))
-
-
-def yes_no(text):
-    """'yes', 'no' or None for a short answer to 'would you like a personalised demo?'."""
-    t = (text or "").strip()
-    if len(t.split()) > 12:
-        return "yes" if (parse(t, datetime.utcnow())["kind"] == "slot" or prefers_team(t)) else None
-    if _NO.match(t):
-        return "no"
-    return "yes" if _YES.match(t) else None
-
-
-def phone_in(text):
-    m = _PHONE.search(text or "")
-    return re.sub(r"[\s\-]", "", m.group(1)) if m else None
-
-
-def channel_in(text):
-    low = (text or "").lower()
-    if "meet" in low and "google" in low or "g-meet" in low or "gmeet" in low:
-        return "Google Meet"
-    if "google meet" in low:
-        return "Google Meet"
-    if "whatsapp" in low or "video call" in low:
-        return "WhatsApp video call"
-    return None
 
 
 CHANNEL_NAMES = {"whatsapp": "WhatsApp video call", "meet": "Google Meet"}
