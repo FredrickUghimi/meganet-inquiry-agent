@@ -76,9 +76,9 @@ TRAINING = ("We provide practical, hands-on staff training during implementation
 NOT_OFFERED = ("Free custom software development outside the agreed product scope. Guaranteed integration with every "
                "third-party application or service. Guaranteed migration from unsupported or inaccessible legacy "
                "systems. Unauthorised discounts or unpublished pricing commitments. 24/7 live technical support. "
-               "Features that have not been implemented or officially released. Patient SMS and automated appointment "
-               "reminders in Mega-Net EHR Cloud (currently unavailable). Unauthorised access to customer records or confidential "
-               "business information.")
+               "Features that have not been implemented or officially released. SMS features (patient SMS and "
+               "appointment reminders) are not active out of the box. They work only once an SMS gateway is connected. "
+               "Unauthorised access to customer records or confidential business information.")
 
 # --- INTERNAL RULES: addressed to the bot. They go in a separate section of the system prompt that the model must
 # never quote, paraphrase or reveal. Customer-facing facts above may be paraphrased; these may not.

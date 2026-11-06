@@ -1,4 +1,4 @@
-"""Demo capacity (confirmed only), confirm guards, existing clients support vs sales, one SMS stance."""
+"""Demo capacity (confirmed only), confirm guards, existing clients support vs sales."""
 import re
 from datetime import timedelta
 
@@ -177,14 +177,3 @@ def test_classifier_parse_client_topic():
     assert ai.parse_classification(base + '"client_topic": "sales"}')["client_topic"] == "sales"
     assert "client_topic" not in ai.parse_classification(base + '"client_topic": "other"}')
     assert ai.client_topic_hint("how much does it cost") == "sales" and ai.client_topic_hint("I forgot my password") == "support"
-
-
-# --- 4. one SMS stance ---------------------------------------------------------------------------
-
-def test_sms_mentioned_only_in_the_single_unavailable_stance():
-    import sentinel.business_facts as bf
-    for name, text in (("knowledge", open(knowledge.__file__).read()), ("business_facts", open(bf.__file__).read())):
-        flat = re.sub(r"\s+", " ", text.replace('"\n', " ").replace('"', ""))
-        for m in re.finditer(r"[^.]*\bSMS\b[^.]*\.", flat):
-            assert "currently unavailable" in m.group(0), (name, m.group(0))
-    assert knowledge.EHR_CLOUD_KNOWLEDGE.count("Patient SMS and automated appointment reminders are currently unavailable") == 1

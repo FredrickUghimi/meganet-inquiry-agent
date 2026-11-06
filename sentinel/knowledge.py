@@ -83,8 +83,12 @@ Nurse and Front Desk/Registration can enroll but are not required to. Mega-Net p
 Do not repeat the older docs that list only three mandatory roles.
 
 Built, but may need switching on or setting up per client (do not promise they are live for a given client):
-- Radiology critical-finding escalation beyond the in-app alert: built but currently inactive. The in-app critical-finding
-  alert is what works today.
+- SMS (patient messages and appointment reminders) is built into Mega-Net EHR Cloud but is not active by default. It works
+  only once an SMS gateway is connected for the organisation. Setup, availability and any SMS costs are confirmed by the
+  team. Never promise it, a date or a price, and never say reminders work today. Do not name a gateway provider.
+- Appointment reminder SMS: built, off by default for every organisation, and needs a connected SMS gateway before it can send.
+- Patient SMS: built, and stays in simulated mode (nothing real is sent) until a real SMS gateway is connected.
+- Radiology critical-finding SMS escalation: inactive. Only the in-app critical-finding alert works.
 - Financial Sentinel AI explanations: need the AI service configured; without it findings show plain template wording.
   Detection itself works either way.
 - Radiology image upload from a device: needs file storage configured for the deployment; otherwise images are attached by link.
@@ -96,7 +100,6 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
 - Discount, waiver and refund recording, and therefore no Financial Sentinel monitoring of discounts or refunds.
 - Scheduled recurring reports: the data model exists but nothing runs it and there is no screen to set one up.
   There is no dedicated Radiology dashboard.
-- Patient SMS and automated appointment reminders are currently unavailable in Mega-Net EHR Cloud. Never offer or promise them.
 - Custom roles (planned for a later phase, not available now).
 - Uploading a document file from a device in Document management (it currently takes a link).
 - Background job processing, so anything that needs to run on a schedule or after a delay is not available.
