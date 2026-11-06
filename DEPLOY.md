@@ -137,14 +137,20 @@ flow, so no stored state can make the bot repeat a canned line. Guardrails in co
   out). A customer repeating the same question is escalated with the reason "loop: customer repeated the same question".
   Complaints and questions the notes do not cover alert you as before.
 
-**First product reply.** The first reply to a lead whose product is known (named in their message, or chosen with the
-EHR Cloud / ERP Cloud button) is the approved text in `sentinel/knowledge.py` (`ERP_FIRST_REPLY`, `EHR_FIRST_REPLY`): the
-first name filled in, a short list of confirmed modules, and one closing question. Claude may adapt it to what the customer
-already wrote (for example skip the closing question), but it may not add features, use the words "comprehensive", "entire
-operations" or "all-in-one", go over 150 words, or ask two questions; a draft that does is regenerated, and if it still
-does, the approved text is sent as it is. To change what the bot claims, edit the text there and the matching "Customer-safe
-module summary" in the same file. `python scripts/eval_replies.py` checks the first replies too (name, one question, within
-150 words, only confirmed features).
+**First product reply.** The first reply when a lead first shows interest in a product (named in their message, or chosen
+with the EHR Cloud / ERP Cloud button) is the approved text in `sentinel/knowledge.py` (`ERP_FIRST_REPLY`,
+`EHR_FIRST_REPLY`): the first name ("Hello!" if unknown), a short description with the confirmed modules, the product
+demonstration video, the Wednesday live-demo line (built from `business_facts.py`) and one closing question. The video link
+is never in a template or a prompt: the text has a `{video_url}` placeholder and the code inserts the exact link from
+`PRODUCT_DEMO_VIDEOS`, skipping the video if the same one went out in the last 24 hours and removing any other link. Claude
+may adapt the reply to what the customer already wrote (for example skip the closing question), but it may not add features,
+use the words "comprehensive", "entire operations" or "all-in-one", go over 150 words, or ask two questions; a draft that
+does is regenerated, and if it still does, the approved text is sent as it is. When the reply goes out the code records that
+the video was sent and that the live-demo offer was made, so there is no second video or offer within 24 hours, and a
+reply such as "yes, Wednesday works" is treated as accepting the offer. To change what the bot claims, edit the text there
+and the matching "Customer-safe module summary" in the same file. `python scripts/eval_replies.py` checks the first replies
+too (name, one question, within 150 words, the product's own link exactly as stored, the Wednesday line, confirmed features
+only).
 
 **Checking replies before you rely on them.** In the Render Shell run `python scripts/eval_replies.py` (needs
 `ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it). It runs 18 awkward

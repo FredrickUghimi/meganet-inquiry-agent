@@ -173,10 +173,18 @@ def video_for(product):
     return (label, PRODUCT_DEMO_VIDEOS[label]) if label in PRODUCT_DEMO_VIDEOS else None
 
 
+def prompt_display(name):
+    """How a fact appears in the prompt. The demo video links are never put in a prompt: the code inserts them."""
+    if name == "PRODUCT_DEMO_VIDEOS":
+        return ("a demo video exists for " + " and ".join(PRODUCT_DEMO_VIDEOS)
+                + ". The system adds the exact link; never write, copy or change a link yourself")
+    return display(name)
+
+
 def prompt_block():
     lines = []
     for name, label in FACTS:
-        lines.append(f"- {label}: " + ("UNKNOWN (say the team will confirm; never guess)" if is_todo(name) else display(name)))
+        lines.append(f"- {label}: " + ("UNKNOWN (say the team will confirm; never guess)" if is_todo(name) else prompt_display(name)))
     return "Business facts (customer-facing; you may paraphrase these):\n" + "\n".join(lines)
 
 

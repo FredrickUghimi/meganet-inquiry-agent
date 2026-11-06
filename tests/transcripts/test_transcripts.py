@@ -209,7 +209,7 @@ def test_fixed_text_only_when_claude_fails_with_warning_and_visible_note(chat, c
     cl.fail = True
     r = chat.say("Hi, we run a clinic and need EHR Cloud", )
     from sentinel import knowledge
-    assert r == [knowledge.first_reply("ehr_cloud", "Amaka")]
+    assert r == [knowledge.first_reply("ehr_cloud", "Amaka").replace(knowledge.VIDEO_PLACEHOLDER, business_facts.video_for("ehr_cloud")[1])]
     assert any("fixed fallback" in rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING")
     assert "fixed fallback" in chat.lead.ai_note
     html = _page(chat)
@@ -483,7 +483,7 @@ def test_prompt_contains_the_demo_context_and_the_structured_spec(chat, cl):
     chat.say("Can I get a demo of EHR Cloud?", DEMO_ASK)
     chat.say("thanks", turn("You're welcome."))
     system = cl.calls[1]["system"]
-    for needle in ("Demo and conversation context", "demo video: sent", "You asked about a personalised demo",
+    for needle in ("Demo and conversation context", "demo video: sent", "You offered a personalised live demo",
                    "Live demos run on Wednesdays at 10:00 AM WAT", "Suggested next step",
                    "demo_signal", "needs_human", "asked_personalised_offer", "share_video"):
         assert needle in system, needle

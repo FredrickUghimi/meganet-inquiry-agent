@@ -67,7 +67,8 @@ def test_internal_rules_are_in_a_separate_never_reveal_section(app):
     for text in (business_facts.DEMO_BOOKING_WORKFLOW, business_facts.PRICING_INTERNAL_RULE, business_facts.SUPPORT_INTERNAL_RULE):
         assert text in internal and text not in customer
     assert business_facts.PRICING_POLICY in customer and business_facts.SUPPORT_ROUTE_FOR_EXISTING_CLIENTS in customer
-    assert EHR_LINK in customer and "Never confirm a live demonstration" not in customer
+    assert EHR_LINK not in prompt and ERP_LINK not in prompt  # links are inserted by code, never put in a prompt
+    assert "never write, copy or change a link yourself" in customer and "Never confirm a live demonstration" not in customer
     for text in (business_facts.PRICING_POLICY, business_facts.SUPPORT_ROUTE_FOR_EXISTING_CLIENTS):
         assert "Never invent" not in text and "rather than treating" not in text
 

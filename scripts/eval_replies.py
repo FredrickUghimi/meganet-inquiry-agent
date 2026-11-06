@@ -29,7 +29,8 @@ MAX_WORDS = 90
 FIRST_REPLY_WORDS = knowledge.FIRST_REPLY_MAX_WORDS
 # Claims the code review found NOT BUILT, UNKNOWN or only PARTLY true: never in a first product reply.
 FIRST_REPLY_FORBID = re.compile(r"\b(branch(es)?|tasks?|time tracking|android|iphone|AI|artificial intelligence|pipeline|"
-                                r"reminders?|SMS|24/7|offline|portal|comprehensive|entire operations|all-in-one|all in one)\b", re.I)
+                                r"reminders?|SMS|24/7|offline|portal|comprehensive|entire operations|all-in-one|all in one|"
+                                r"project tracking|every facility)\b", re.I)
 
 # history: (direction, text, hours_ago); the LAST entry is the customer's latest message (hours_ago 0).
 # expect: the reply must match at least one of these patterns, which shows the latest message was addressed.
@@ -37,10 +38,13 @@ OFFER = "Would you also like a personalised demonstration with our team?"
 VIDEO_SENT = ("out", f"Happy to show you. This video introduces Mega-Net EHR Cloud. Mega-Net EHR Cloud demo video: "
                      f"{business_facts.PRODUCT_DEMO_VIDEOS['Mega-Net EHR Cloud']}\n\n{OFFER}", 3)
 FIRST_REPLY_SCENARIOS = [
-    dict(name="first ERP reply, bare inquiry", first_reply="erp_cloud", lead=dict(product_interest="erp_cloud", status="new"),
+    dict(name="first ERP reply, bare inquiry", first_reply="erp_cloud", first_strict=True, lead=dict(product_interest="erp_cloud", status="new"),
          history=[("in", "Hi, I am interested in ERP Cloud", 0)], expect=[r"ERP Cloud", r"\?\s*$"]),
-    dict(name="first EHR reply, bare inquiry", first_reply="ehr_cloud", lead=dict(product_interest="ehr_cloud", status="new"),
+    dict(name="first EHR reply, bare inquiry", first_reply="ehr_cloud", first_strict=True, lead=dict(product_interest="ehr_cloud", status="new"),
          history=[("in", "Good morning, please tell me about your EHR Cloud", 0)], expect=[r"EHR Cloud", r"\?\s*$"]),
+    dict(name="first EHR reply, demo request as the first message", first_reply="ehr_cloud", first_strict=True,
+         lead=dict(product_interest="ehr_cloud", status="new"),
+         history=[("in", "Hello, can I get a demo of EHR Cloud?", 0)], expect=[r"EHR Cloud"]),
     dict(name="first ERP reply, business and problem already given", first_reply="erp_cloud",
          lead=dict(product_interest="erp_cloud", status="new"),
          history=[("in", "Hello, I run a pharmacy in Lagos and my stock keeps getting lost. Interested in ERP Cloud", 0)],
@@ -100,7 +104,7 @@ def check_reply(reply, scenario, prior_bot_texts):
     """[(check name, ok, detail)] for one reply."""
     words = len(reply.split())
     repeated = [t for t in prior_bot_texts if ai.similarity(reply, t) > ai.REPEAT_THRESHOLD]
-    first = scenario.get("first_reply")  # the approved first product reply gets its own limits
+    first = scenario.get("first_reply")  # the approved first product reply gets its own limits and checks
     checks = [
         ("no repeated bot text", not repeated, f"similar to an earlier bot message" if repeated else ""),
         ("no currency amounts", not ai._PRICE_RE.search(reply), ""),
@@ -111,16 +115,26 @@ def check_reply(reply, scenario, prior_bot_texts):
          and not any(re.search(p, reply, re.I) for p in scenario.get("forbid", [])), ""),
     ]
     if first:
-        bullets = [line[1:].strip() for line in reply.splitlines() if line.strip().startswith("\u2022")]
-        approved = [line[1:].strip() for line in knowledge.first_reply(first, "x").splitlines() if line.startswith("\u2022")]
-        stray = [b for b in bullets if b not in approved]
-        body = reply.replace("flow into the accounting automatically", "")
+        own = business_facts.video_for(first)[1]
+        other = [u for u in business_facts.PRODUCT_DEMO_VIDEOS.values() if u != own]
+        urls = re.findall(r"https?://\S+", reply)
+        n_questions = re.sub(r"https?://\S+", "", reply).count("?")  # the ?si= in the link is not a question
+        body = re.sub(r"https?://\S+", "", reply).replace("flow into the accounting automatically", "")
+        forbidden = FIRST_REPLY_FORBID.search(body)
         checks += [
             ("uses the customer's name", bool(re.search(r"\bAmaka\b", reply)), ""),
-            ("at most one question", reply.count("?") <= 1, f"{reply.count('?')} question marks"),
-            ("only confirmed features", not stray and not FIRST_REPLY_FORBID.search(body),
-             f"unapproved bullet(s): {stray}" if stray else (FIRST_REPLY_FORBID.search(body).group(0) if FIRST_REPLY_FORBID.search(body) else "")),
+            ("exactly one closing question" if scenario.get("first_strict") else "at most one question",
+             n_questions == 1 if scenario.get("first_strict") else n_questions <= 1, f"{n_questions} questions"),
+            ("own video link, exactly as stored", urls.count(own) == 1 and not [u for u in urls if u != own and u not in other],
+             f"links found: {urls}"),
+            ("no other product's video", not any(u in reply for u in other), ""),
+            ("Wednesday live-demo offer", knowledge.demo_line() in reply, ""),
+            ("only confirmed features", not forbidden, forbidden.group(0) if forbidden else ""),
         ]
+        if scenario.get("first_strict"):
+            feature_sentence = next(line for line in knowledge.first_reply(first, "x").split("\n\n") if line.startswith(f"Mega-Net"))
+            checks.append(("approved feature sentence kept", feature_sentence.split(". It combines ", 1)[1] in reply,
+                           "the 'It combines ...' sentence was changed"))
     return checks
 
 

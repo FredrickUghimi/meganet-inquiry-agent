@@ -467,7 +467,9 @@ def _record_open_question(lead, flag, question, already_alerted, say):
 # One-line descriptions use only what PRODUCT_NOTES says about each product; never what a video contains.
 VIDEO_BLURB = {"ehr_cloud": "our cloud electronic health records system for clinics and hospitals",
                "erp_cloud": "our cloud ERP for businesses (operations, finance and inventory)"}
-PERSONALISED_RE = re.compile(r"personali[sz]ed\s+(demo|demonstration)", re.I)
+PERSONALISED_RE = re.compile(r"personali[sz]ed\s+(live\s+)?(demo|demonstration)", re.I)
+OFFER_LINE_RE = re.compile(knowledge.OFFER_LINE_RE, re.I)
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+|\byoutu\.be/\S+", re.I)
 OFFER_COOLDOWN = timedelta(hours=24)
 MAX_IGNORED_OFFERS = 2
 SILENCE_GAP = timedelta(days=3)
@@ -571,8 +573,11 @@ def demo_context(lead, history, pending, now, intent=None):
     elif state == "declined":
         lines.append("- The customer DECLINED a personalised demo. Do not push it; accept their choice.")
     elif lead.demo_offer_asked_at:
-        lines.append(f"- You asked about a personalised demo {_ago(now - lead.demo_offer_asked_at)}; ignored "
-                     f"{lead.demo_offer_ignored} time(s).")
+        lines.append(f"- You offered a personalised live demo with the team ({demo.rule_text()}) {_ago(now - lead.demo_offer_asked_at)}"
+                     f"; ignored {lead.demo_offer_ignored} time(s). A reply like 'yes', 'Wednesday works' or 'I'd like a live "
+                     "demo' ACCEPTS it: set demo_signal accepted_personalised and ask only for the details still missing "
+                     "(name, organisation, phone, WhatsApp video call or Google Meet). Do not send the video again and do not "
+                     "make the offer again. A thank-you or another question is NOT an answer: just answer it.")
     else:
         lines.append("- You have not yet asked about a personalised demo.")
     lines.append("- You MAY ask the personalised-demo question in this reply." if allowed else
@@ -648,6 +653,53 @@ def _pencil(lead, d, start):
     log.info("demo lead=%s request=%s pencilled (tentative)", lead.id, d.id)
 
 
+def sanitize_links(text):
+    """Only the stored demo video links may appear in a reply, character for character. Any other link Claude wrote (or a
+    rewritten or shortened copy of one) is removed."""
+    approved = set(business_facts.PRODUCT_DEMO_VIDEOS.values())
+
+    def keep(m):
+        url = m.group(0)
+        stripped = url.rstrip(".,;:!?)")
+        return url if stripped in approved or url in approved else ""
+    return re.sub(r"[ \t]+(\n)", r"\1", _URL_RE.sub(keep, text)).strip()
+
+
+def fill_video_placeholder(lead, reply):
+    """Replace the {video_url} placeholder of the approved first reply with the exact stored link for the lead's product.
+    If that video was already sent in the last 24 hours, the 'Watch our product demonstration' paragraph is dropped.
+    Returns (reply, video_inserted)."""
+    if knowledge.VIDEO_PLACEHOLDER not in reply:
+        return reply, False
+    vid = business_facts.video_for(lead.product_interest)
+    if vid and not _video_sent_recently(lead, vid[1]):
+        return reply.replace(knowledge.VIDEO_PLACEHOLDER, vid[1]), True
+    paragraphs = [p for p in reply.split("\n\n") if knowledge.VIDEO_PLACEHOLDER not in p]
+    return "\n\n".join(paragraphs).strip(), False
+
+
+def record_offer(lead, now):
+    """The personalised-demo offer was made now: from here the 24-hour and two-ignored-asks rules apply."""
+    lead.demo_offer_asked_at, lead.demo_offer_open = now, True
+    if personalised_state(lead) is None:
+        lead.demo_state = "asked"
+
+
+def finish_first_reply(lead, reply, now, dry_run=False):
+    """Code side of the approved first reply (also used after a menu tap): insert the exact video link, drop stray links,
+    and record at send time that the video was sent (it is then in the message itself, with the product and time) and that
+    the live-demo offer was made. Returns (reply, actions)."""
+    reply, inserted = fill_video_placeholder(lead, reply)
+    reply = sanitize_links(reply)
+    actions = ["video"] if inserted else []
+    if OFFER_LINE_RE.search(reply) and offer_allowed(lead, now)[0]:
+        actions.append("offer")
+        if not dry_run:
+            record_offer(lead, now)
+            db.session.commit()
+    return reply, actions
+
+
 def _insert_after_first_paragraph(text, extra):
     if "\n\n" in text:
         head, rest = text.split("\n\n", 1)
@@ -673,12 +725,21 @@ def _set_state(lead, new):
     lead.demo_state = new
 
 
-def apply_turn(lead, turn, pending, history, now, dry_run, say):
+def apply_turn(lead, turn, pending, history, now, dry_run, say, situation=None):
     """Apply the structured draft: validate its demo_signal and update state. Returns the final reply text (Claude's
     reply plus any exact video links) and a list of actions taken. Guardrails only: nothing here writes the customer's
     reply, and a demo is never confirmed (only `confirm <id>` does that)."""
     reply, sig, actions = turn["reply"], turn["demo_signal"], []
     latest = " ".join(m.body for m in pending)
+    first_reply_offer = False
+    placed = set()  # products whose video link is already in this reply
+    if situation == "first_product_reply":
+        # the approved first reply: the code inserts the exact video link; the live-demo line is the personalised-demo offer
+        reply, inserted = fill_video_placeholder(lead, reply)
+        first_reply_offer = bool(OFFER_LINE_RE.search(reply))
+        if inserted:
+            actions.append("video")
+            placed.add(lead.product_interest)
     allowed, _ = offer_allowed(lead, now, wants_demo=(sig == "wants_demo"))
     before = personalised_state(lead)
 
@@ -700,13 +761,14 @@ def apply_turn(lead, turn, pending, history, now, dry_run, say):
     if video and not prefers_team:
         for p in (list(VIDEO_BLURB) if video == "both" else [video]):
             label, url = business_facts.video_for(p)
-            if not _video_sent_recently(lead, url):
+            if p not in placed and url not in reply and not _video_sent_recently(lead, url):
                 links.append(f"{label} demo video: {url}")
     if links:
         reply = _insert_after_first_paragraph(reply, "\n".join(links))
         actions.append("video")
     # 4. the personalised-demo question: at most once per 24 hours
-    asked = turn["asked_personalised_offer"] or bool(PERSONALISED_RE.search(reply) and "?" in reply)
+    asked = (turn["asked_personalised_offer"] or first_reply_offer
+             or bool(PERSONALISED_RE.search(reply) and "?" in reply))
     if asked and not allowed:
         log.info("lead=%s reply asked the personalised-demo question while not allowed; removed", lead.id)
         reply = _strip_offer(reply)
@@ -753,6 +815,7 @@ def apply_turn(lead, turn, pending, history, now, dry_run, say):
             reply += demo.team_note(now)
     if sig == "asked_to_reschedule":
         actions.append("reschedule-requested")
+    reply = sanitize_links(reply)
     # 6. persist
     if not dry_run:
         if ignored_inc:
@@ -764,9 +827,7 @@ def apply_turn(lead, turn, pending, history, now, dry_run, say):
         if new_state:
             _set_state(lead, new_state)
         if asked:
-            lead.demo_offer_asked_at, lead.demo_offer_open = now, True
-            if personalised_state(lead) is None:
-                lead.demo_state = "asked"
+            record_offer(lead, now)
         db.session.commit()
     say(f"demo signal={sig} state={lead.demo_state} actions={actions or '-'}")
     return reply, actions
@@ -1227,7 +1288,7 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
             turn = dict(turn, needs_human="customer asked to talk to a person", handover=True)
         if not turn.get("needs_human") and _is_repeat_question(lead, pending):
             turn = dict(turn, needs_human="loop: customer repeated the same question")
-        text, actions = apply_turn(lead, turn, pending, history, now, dry_run, say)
+        text, actions = apply_turn(lead, turn, pending, history, now, dry_run, say, situation)
         say(f"draft ready ({len(text)} chars)")
         say(f"drafted reply text: {text!r}", detail=True)
         if dry_run:
@@ -1336,9 +1397,10 @@ def _handle_choice(lead, choice, history, dry_run, say):
         return "skipped", "WhatsApp not configured (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)"
     if choice == "other":
         text, _ = _claude_text(lead, "other_choice", menu.OTHER_REPLY)
-    else:  # they chose a product: the approved first product reply
+    else:  # they chose a product: the approved first product reply, with the exact video link inserted by code
         text = ai.draft_turn(lead, history, "first_product_reply", knowledge.first_reply_brief(choice, lead.name),
                              fallback_text=knowledge.first_reply(choice, lead.name), structured=False)["reply"]
+        text, _ = finish_first_reply(lead, text, utcnow())
     msg = send_whatsapp(lead, text=text)
     if choice == "other":
         send_owner_alert(lead, menu.OTHER_ALERT.format(name=lead.display_name))

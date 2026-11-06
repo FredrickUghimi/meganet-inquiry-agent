@@ -66,28 +66,45 @@ Modules that exist in the product:
   are in the business facts.
 
 Customer-safe module summary (verified against the EHR Cloud code on 2026-11-06; say only this about the modules):
-- Patient registration and records: CONFIRMED. Demographics, next of kin, insurance and payer details, allergies, vitals,
-  diagnoses, immunizations, clinical notes, check-in.
-- Appointments: CONFIRMED. Provider availability, booking, reschedule and cancel, and an online booking page for each
-  facility that offers only the slots staff configure. Caveat: reminders are SMS and are covered by the SMS stance below.
-- Billing, payments and insurance claims: CONFIRMED. Invoices, payments (partial allowed), claims with approve or reject,
-  payers and tariffs, built around Nigerian health insurance (NHIS) with capitation and fee-for-service.
-- Lab, radiology and pharmacy: CONFIRMED. Lab orders, specimens and verified results; imaging orders and studies with
-  in-app critical-finding alerts; drug formulary, prescriptions and dispensing.
-- Inventory: CONFIRMED. Stock items, suppliers, purchase orders and a low-stock list.
-- Wards and admissions: CONFIRMED. Wards and beds, admit, transfer, discharge summary; nursing medication chart and handover.
-- Surgery and antenatal: CONFIRMED. Theatre board, surgical team, consent; antenatal registrations, visits, delivery outcome.
-- Reports and dashboards: CONFIRMED. Visits, Revenue, Lab, Pharmacy and Inventory dashboards, a multi-facility comparison and
-  data export.
-- Financial Sentinel: PARTLY. Rule-based detection of billing and revenue problems for a person to review; AI-written
-  explanations need the AI service switched on, detection works without it. It takes no action by itself.
-- Several facilities under one organisation, role-based access and audit logging: CONFIRMED. MFA is mandatory for some roles.
-- Use on a phone: UNKNOWN. It is used in a web browser; page layouts were checked at phone width during development but not
-  confirmed on a live site, and there are no Android or iPhone apps. Say only that it runs in a web browser.
-Never claim (NOT BUILT or UNKNOWN): a patient portal or patient app; Android or iPhone apps; accounting or a general ledger
-(EHR Cloud is not the ERP product); custom roles; payroll; that it is battle-tested, widely used or certified. Anything else
-not listed here: say Fredrick or the team will confirm. For anything about text messages or reminders, use only the gateway
-rule in the section below.
+- Patient records and clinical notes: CONFIRMED. Registration, demographics, next of kin, insurance and payer details,
+  allergies, vitals, diagnoses, immunizations, clinical notes, check-in (patient_registry).
+- Appointments: CONFIRMED. Provider availability, booking, reschedule and cancel (scheduling).
+- Patient queues: CONFIRMED. A front-desk to nurses-bay to consultation queue (service_queue).
+- Online patient booking: CONFIRMED. Each facility has a public booking page (/book/<organisation>/<facility>/). There is no
+  on/off switch; it offers only the slots staff have set up as provider availability, so it shows nothing until staff do
+  that. A bot-protection check on the form is optional and needs setting up by the platform.
+- Doctor consultations and prescriptions: CONFIRMED. A consultation screen with notes, diagnoses and lab/imaging orders
+  (api/consultation.py) and prescriptions with dispensing (pharmacy).
+- Nursing workflows: CONFIRMED. Nurses-bay intake and vitals; for inpatients a medication administration chart, fluid and
+  feeding charts and handover reports (inpatient_nursing).
+- Laboratory: CONFIRMED. Test catalogue, orders, specimens, result entry with second-person verification, corrections.
+- Radiology: CONFIRMED. Imaging orders, studies and reports with in-app critical-finding alerts.
+- Pharmacy: CONFIRMED. Drug formulary, interaction checks, prescriptions, dispensing, controlled-substance log.
+- Inventory: CONFIRMED. Stock items, suppliers, purchase orders, stock movements and a low-stock list.
+- Billing and payments: CONFIRMED. Invoices, payments (partial allowed), voiding.
+- NHIS and HMO claims, and insurance claims: CONFIRMED. Payers (including NHIS-accredited HMOs and corporate cover), tariffs per
+  payer, capitation and fee-for-service, claims with approve or reject (billing).
+- Reports: CONFIRMED. Visits, Revenue, Lab, Pharmacy and Inventory dashboards, a facilities overview and data export.
+- Financial Sentinel: CONFIRMED with a caveat. It flags possible billing and revenue problems (for example an unbilled service
+  or a duplicate transaction) for a person to review and takes no action itself. The plain-English explanations are written
+  by AI when the AI service is configured; when it is not, each finding shows fixed template wording instead and the
+  detection still works.
+- Role-based access: CONFIRMED. A user holds a role at a facility and sees what that role allows; some roles must use an
+  authenticator app (MFA).
+- Separation of each facility's data: PARTLY. Every organisation's data is isolated from every other organisation's.
+  Within one organisation, staff access and visits (encounters) are scoped to a facility, but a patient's identity record is
+  shared across the organisation's facilities on purpose, and organisation-level roles can see across facilities. Say
+  "each organisation's data stays separate and staff access is set per facility", never that facilities cannot see each other.
+- Cloud use with no server: CONFIRMED. A cloud-hosted multi-tenant web app used in a browser; the customer buys and runs no
+  server.
+- Use on Android and iPhone browsers: UNKNOWN. It is used in a web browser and pages were checked at phone width during
+  development, but this was not confirmed on a live site, and there are no Android or iPhone apps. Say only that it runs in a
+  browser.
+Never claim (NOT BUILT or UNKNOWN): a patient portal or patient app; Android or iPhone apps or confirmed phone support;
+accounting or a general ledger (EHR Cloud is not the ERP product); custom roles; payroll; that facilities cannot see each
+other's patients at organisation level; that online booking works without staff setting up availability; that it is
+battle-tested, widely used or certified. Anything else not listed here: say Fredrick or the team will confirm. For anything
+about text messages or reminders, use only the gateway rule in the section below.
 
 System roles (nine, all system-defined):
 1. Super Admin (Mega-Net platform level, not a client role)
@@ -266,73 +283,89 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
 
 
 # --- Approved first product replies ---------------------------------------------------------------------------------
-# The first reply to a lead whose product is known. Every line was checked against the product code on 2026-11-06 (see the
-# "Customer-safe module summary" in each knowledge block). Claude may adapt the reply to what the customer already wrote
-# (reorder, drop a line that does not fit, skip the closing question when they have already told us their business and their
-# problem) but must not add features, and the reply stays within FIRST_REPLY_MAX_WORDS. Later replies stay under about 90.
+# The first reply to a lead who first shows interest in a product (including a tap on the EHR Cloud / ERP Cloud button).
+# Every claim was checked against the product code on 2026-11-06 (see the "Customer-safe module summary" in each knowledge
+# block); lines that were only partly true are softened. The video link is NEVER written here or in a prompt: the text carries
+# the placeholder below and the code inserts the exact link from business_facts.PRODUCT_DEMO_VIDEOS. Claude may adapt the reply
+# to what the customer already wrote but must not add features, and it stays within FIRST_REPLY_MAX_WORDS.
 FIRST_REPLY_MAX_WORDS = 150
 BANNED_PHRASES = ("comprehensive", "entire operations", "all-in-one", "all in one")
+VIDEO_PLACEHOLDER = "{video_url}"
+OFFER_LINE_RE = r"personali[sz]ed\s+live\s+demos?\s+(are\s+)?held"
 
 ERP_FIRST_REPLY = """\
-Hello {name}! Thank you for your interest in Mega-Net ERP Cloud.
+{hello} Thank you for your interest in Mega-Net ERP Cloud.
 
-Mega-Net ERP Cloud is cloud-based business management and accounting software that brings your day-to-day operations into one place.
+Mega-Net ERP Cloud is cloud-based business management and accounting software that brings your day-to-day operations into one place. It combines accounting and financial reports, sales and invoicing, inventory, purchasing and suppliers, customer records, HR and payroll, project costing, and Business Sentinel, which checks your records for unusual items whenever you run a scan.
 
-It combines:
-\u2022 Accounting and financial reports
-\u2022 Sales, invoicing and payments
-\u2022 Inventory and stock management
-\u2022 Purchasing and suppliers
-\u2022 Customer records, with follow-up dates and notes
-\u2022 HR and payroll
-\u2022 Project costing, to see the cost and profit of each job
-\u2022 Business Sentinel, which checks your records for unusual items whenever you run a scan
+The modules work together, so your sales and purchases flow into the accounting automatically, and you use it in a web browser, with a layout that adapts to phones.
 
-The modules work together, so your sales and purchases flow into the accounting automatically. It runs in a web browser, so there is nothing to install, and the layout adapts to phones.
+Watch our product demonstration:
+{video_url}
 
-To suggest the best fit: what type of business do you run, and what's the biggest challenge you want the software to solve?"""
+{demo_line}
+
+What type of business do you run, and what's the biggest challenge you want the software to solve?"""
 
 EHR_FIRST_REPLY = """\
-Hello {name}! Thank you for your interest in Mega-Net EHR Cloud.
+{hello} Thank you for your interest in Mega-Net EHR Cloud.
 
-Mega-Net EHR Cloud is cloud-based software that helps clinics and hospitals run patient care and billing from one platform.
+Mega-Net EHR Cloud is cloud-based electronic health records and hospital management software for clinics and hospitals. It combines patient records, appointments, doctor consultations, nursing workflows, prescriptions, laboratory and radiology, pharmacy, inventory, billing and insurance claims, reports, and Financial Sentinel, which flags possible billing problems for you to review.
 
-It covers:
-\u2022 Patient registration and records
-\u2022 Appointments, with an online booking page for each facility
-\u2022 Billing, payments and insurance claims, built around Nigerian health insurance (NHIS)
-\u2022 Lab, radiology and pharmacy
-\u2022 Inventory and purchase orders
-\u2022 Wards, admissions and discharge
-\u2022 Reports and dashboards, and Financial Sentinel, which flags possible billing problems for you to review
+Each staff member sees only what their role allows, each organisation's data stays separate, and it runs in a browser, so there's no server to buy or maintain.
 
-Access is role-based, and one organisation can run several facilities. It runs in a web browser, so there is nothing to install.
+Watch our product demonstration:
+{video_url}
 
-To suggest the best fit: is yours a clinic or a hospital, and what's the biggest challenge you want the software to solve?"""
+{demo_line}
+
+Is yours a clinic or a hospital, and what's the main problem you want to fix?"""
 
 FIRST_REPLIES = {"erp_cloud": ERP_FIRST_REPLY, "ehr_cloud": EHR_FIRST_REPLY}
 
 
 def first_name(name):
     parts = (name or "").strip().split()
-    return parts[0] if parts and parts[0].isalpha() else "there"
+    return parts[0] if parts and parts[0].isalpha() else None
+
+
+def _clock(h, m):
+    return f"{(h % 12) or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
+def demo_line():
+    """The live-demo sentence, built from business_facts so the day and time have one source."""
+    from . import business_facts as bf
+    h, m = bf.demo_hm()
+    return f"Personalised live demos are held every {bf.DEMO_WEEKDAY} at {_clock(h, m)} (WAT), subject to confirmation."
 
 
 def first_reply(product, name=None):
-    """The approved first reply for 'erp_cloud' / 'ehr_cloud' with the name filled in (None for any other product)."""
+    """The approved first reply for 'erp_cloud' / 'ehr_cloud' with the name ("Hello!" when unknown) and the demo line
+    filled in. The video placeholder is left in for the code to replace with the exact stored link (None for any other
+    product)."""
     template = FIRST_REPLIES.get(product)
-    return template.format(name=first_name(name)) if template else None
+    if not template:
+        return None
+    first = first_name(name)
+    return (template.replace("{hello}", f"Hello {first}!" if first else "Hello!")
+            .replace("{demo_line}", demo_line()))
 
 
 def first_reply_brief(product, name=None):
-    """Instructions plus the approved text, for the prompt of the first product reply."""
+    """Instructions plus the approved text, for the prompt of the first product reply. The text contains the video
+    placeholder, never a link."""
     return (
         "APPROVED FIRST REPLY (the lead's first message about this product). Base your reply on it, in the same order and "
-        "wording, with the name filled in. You may adapt it to what the customer has already written: drop or reorder lines "
-        "that do not fit, and skip the closing question if they have already said what business they run and their problem "
-        "(then end with one short question about a next step, or none). Never add a feature that is not in the approved text, "
-        f"never use the words {', '.join(repr(p) for p in BANNED_PHRASES)}, keep it to {FIRST_REPLY_MAX_WORDS} words at most "
-        "and end with at most ONE question. This is the only reply allowed to be longer than about 90 words. If the customer "
-        "asked a question, answer it first in one short sentence, then continue with the approved reply.\n---\n"
+        "wording, with the name already filled in. Keep the line "
+        f"{VIDEO_PLACEHOLDER} exactly as it is on its own line: the system replaces it with the right video link, so never "
+        "type any link yourself. You may adapt the reply to what the customer has already written: skip the closing question "
+        "if they have already said what business they run and their problem (then end with one short question about a next "
+        "step, or none); drop the 'Watch our product demonstration' lines (the placeholder with them) if a video was already "
+        "sent in the last 24 hours; and if their first message is itself a request for a demo, keep this same structure. "
+        "Never add a feature that is not in the approved text, never use the words "
+        f"{', '.join(repr(p) for p in BANNED_PHRASES)}, keep it to {FIRST_REPLY_MAX_WORDS} words at most and end with at most "
+        "ONE question. This is the only reply allowed to be longer than about 90 words. If the customer asked a question, "
+        "answer it first in one short sentence, then continue with the approved reply.\n---\n"
         + first_reply(product, name) + "\n---"
     )

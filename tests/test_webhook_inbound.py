@@ -479,8 +479,9 @@ def test_fallback_path_logs_warning_and_adds_note(app, sent, monkeypatch, caplog
     post(app, text_value(LEAD, mid="wamid.a"))
     db.session.expire_all()  # the reply job commits from its own session
     lead = Lead.query.one()
-    from sentinel import knowledge
-    assert sent[-1][2] == knowledge.first_reply("ehr_cloud", "Amaka")  # the approved first reply is the fallback
+    from sentinel import business_facts, knowledge
+    expected = knowledge.first_reply("ehr_cloud", "Amaka").replace(knowledge.VIDEO_PLACEHOLDER, business_facts.video_for("ehr_cloud")[1])
+    assert sent[-1][2] == expected  # the approved first reply (link inserted by code) is the fallback
     assert "fixed fallback" in lead.ai_note and "BadRequestError http=400" in lead.ai_note
     warns = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any("draft_reply FAILED" in w and "BadRequestError http=400" in w for w in warns)

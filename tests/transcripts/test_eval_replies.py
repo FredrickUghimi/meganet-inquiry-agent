@@ -5,7 +5,7 @@ import os
 import pytest
 
 from replay import ScriptedClaude, cl, turn  # noqa: F401
-from sentinel import ai, knowledge, whatsapp
+from sentinel import ai, business_facts, knowledge, whatsapp
 from sentinel.models import Lead, Message
 
 spec = importlib.util.spec_from_file_location(
@@ -52,7 +52,8 @@ def test_evaluate_runs_the_real_pipeline_in_dry_run_and_sends_and_stores_nothing
     assert "FAIL: " in lines[-1] and "scenarios passed" in lines[-1]
     assert len(cl.calls) == total  # Claude (mocked) was called once per scenario, for real, through the pipeline
     assert sent == [] and Lead.query.count() == real_leads  # nothing sent, nothing stored in the app's database
-    assert "[04] thanks plus price" in text and "bot:      You're welcome!" in text
+    idx = [i for i, s in enumerate(ev.SCENARIOS, 1) if s["name"].startswith("thanks plus price")][0]
+    assert f"[{idx:02d}] thanks plus price" in text and "bot:      You're welcome!" in text
     with eval_app.app_context():  # the throwaway database: dry run wrote no replies either
         assert Message.query.filter_by(sender=None, direction="outbound", channel="whatsapp").filter(
             Message.external_id.is_(None), Message.body.contains("Pricing is tailored")).count() == 0
@@ -77,24 +78,51 @@ def test_without_an_api_key_it_says_so_and_exits_cleanly(monkeypatch, capsys):
 
 def test_first_reply_scenarios_exist_and_the_approved_reply_passes_every_check():
     firsts = [s for s in ev.SCENARIOS if s.get("first_reply")]
-    assert {s["first_reply"] for s in firsts} == {"erp_cloud", "ehr_cloud"} and len(firsts) >= 3
-    for sc in [s for s in firsts if "bare" in s["name"]]:
-        results = ev.check_reply(knowledge.first_reply(sc["first_reply"], "Amaka"), sc, [])
+    assert {s["first_reply"] for s in firsts} == {"erp_cloud", "ehr_cloud"} and len(firsts) >= 4
+    for sc in [s for s in firsts if s.get("first_strict")]:
+        text = knowledge.first_reply(sc["first_reply"], "Amaka").replace(
+            knowledge.VIDEO_PLACEHOLDER, business_facts.video_for(sc["first_reply"])[1])
+        results = ev.check_reply(text, sc, [])
         assert all(ok for _, ok, _ in results), results
-        assert {"uses the customer's name", "at most one question", "only confirmed features"} <= {n for n, _, _ in results}
+        names = {n for n, _, _ in results}
+        assert {"uses the customer's name", "exactly one closing question", "own video link, exactly as stored",
+                "no other product's video", "Wednesday live-demo offer", "only confirmed features",
+                "approved feature sentence kept"} <= names
 
 
 def test_first_reply_checks_catch_each_failure():
     sc = [s for s in ev.SCENARIOS if s["name"] == "first ERP reply, bare inquiry"][0]
-    good = knowledge.first_reply("erp_cloud", "Amaka")
+    own, other = business_facts.video_for("erp_cloud")[1], business_facts.video_for("ehr_cloud")[1]
+    good = knowledge.first_reply("erp_cloud", "Amaka").replace(knowledge.VIDEO_PLACEHOLDER, own)
 
     def failed(text):
         return {n for n, ok, _ in ev.check_reply(text, sc, []) if not ok}
-    assert not failed(good)
+    assert not failed(good)  # the ?si= in the link is not counted as a question
     assert "uses the customer's name" in failed(good.replace("Amaka", "there"))
-    assert "at most one question" in failed(good.replace("software to solve?", "software to solve? And your staff size?"))
+    assert "exactly one closing question" in failed(good.replace("software to solve?", "software to solve? And your staff size?"))
+    assert "exactly one closing question" in failed(good.replace("What type of business do you run, and what's the biggest challenge you want the software to solve?", "Tell me more."))
+    assert "own video link, exactly as stored" in failed(good.replace(own, own.split("?")[0]))  # ?si= dropped
+    assert "own video link, exactly as stored" in failed(good.replace(own, "https://youtu.be/zBbRNTfcozk?si=changed"))
+    assert "own video link, exactly as stored" in failed(good.replace("Watch our product demonstration:\n" + own, ""))
+    assert "no other product's video" in failed(good.replace(own, other))
+    assert "Wednesday live-demo offer" in failed(good.replace(knowledge.demo_line(), ""))
     assert "only confirmed features" in failed(good.replace("HR and payroll", "Branch management across all your locations"))
-    assert "only confirmed features" in failed(good.replace("HR and payroll", "AI that runs your business"))
+    assert "only confirmed features" in failed(good.replace("project costing", "project tracking"))
     assert "only confirmed features" in failed(good.replace("one place", "one comprehensive place"))
-    assert any(n.startswith("under 150") for n in failed(good + " word" * 20))
+    assert "approved feature sentence kept" in failed(good.replace("HR and payroll", "payroll"))
+    assert any(n.startswith("under 150") for n in failed(good + " word" * 40))
     assert ev.check_reply(good, sc, [])[3][0] == "under 150 words"  # the first reply gets 150, others stay at 90
+
+
+def test_first_reply_scenarios_pass_end_to_end_in_dry_run_with_the_link_inserted_by_code(app, sent, cl, monkeypatch):
+    monkeypatch.setattr(whatsapp, "_post", lambda payload: pytest.fail("eval must never send"))
+    strict = [s for s in ev.SCENARIOS if s.get("first_strict")]
+    assert len(strict) == 3
+    for sc in strict:  # Claude keeps the placeholder; the pipeline (dry run) inserts the exact link and records nothing
+        cl.drafts.append(turn(knowledge.first_reply(sc["first_reply"], "Amaka")))
+    lines = []
+    passed, total = ev.evaluate(ev.make_eval_app(), strict, out=lines.append)
+    assert (passed, total) == (3, 3), "\n".join(lines)
+    text = "\n".join(lines)
+    assert business_facts.video_for("ehr_cloud")[1] in text and business_facts.video_for("erp_cloud")[1] in text
+    assert "{video_url}" not in text and sent == []
