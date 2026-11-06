@@ -34,6 +34,7 @@ def test_no_contradictory_or_denying_sms_line_anywhere():
             if "owner" in sentence or "reminder_" in sentence:  # the owner-reminder feature is unrelated
                 continue
             if "never say" in sentence:  # an instruction forbidding such wording is not a denial
+                continue
             for bad in ("currently unavailable", "does not exist", "doesn't exist", "not built", "never offer",
                         "no sms", "sms of any kind", "not available"):
                 assert bad not in sentence, (name, m.group(0))
