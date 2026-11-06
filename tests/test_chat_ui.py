@@ -37,7 +37,7 @@ def ready_lead_with_messages(app, sent, claude):
     post(app, text_value(LEAD, mid="wamid.IN2", body="Second message " + "z" * 120))
     db.session.expire_all()
     lead = Lead.query.one()
-    lead.status = "ready"  # waiting: only Fredrick can answer
+    lead.followup_paused = True  # human-handled: only Fredrick can answer
     db.session.commit()
     sent.clear()
     return lead

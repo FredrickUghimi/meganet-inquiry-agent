@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 style="margin-top:0">Business facts</h2>
+  <p class="mute">Edit these in <code>sentinel/business_facts.py</code>. A fact marked TODO is unknown: the bot says the team will confirm it.</p>
+  <div class="table-scroll"><table>
+    {% for label, value, todo in facts %}
+    <tr><th>{{ label }}</th><td>{{ value }}{% if todo %} <span class="badge" style="background:#fee2e2;color:#b91c1c">TODO</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Handling</h2>
+  <table>{% for label, value in modes %}<tr><th>{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}</table>
+</div>
+{% endblock %}

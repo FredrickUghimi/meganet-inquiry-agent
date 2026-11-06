@@ -38,6 +38,7 @@ class Lead(db.Model):
     menu_sent_at = db.Column(db.DateTime)  # last first-contact tap menu (6h no-repeat rule)
     awaiting_choice = db.Column(db.Boolean, nullable=False, default=False)  # menu sent, no choice yet
     needs_owner = db.Column(db.Boolean, nullable=False, default=False)  # chose "Something else": Fredrick must answer
+    handback_at = db.Column(db.DateTime)  # Fredrick handed the lead back to the bot (resume/reopen)
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",
@@ -67,3 +68,33 @@ class Message(db.Model):
     sender = db.Column(db.String(8))  # outbound only: "owner" (Fredrick, shown as "You"); null = the bot
 
     lead = db.relationship("Lead", back_populates="messages")
+
+
+class DemoRequest(db.Model):
+    """A demo the lead asked for. 'tentative' until Fredrick or the team confirms it; never call it confirmed before."""
+    __tablename__ = "demo_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"), nullable=False, index=True)
+    requested_text = db.Column(db.String(300), nullable=False, default="")  # what the lead wrote (shown on the lead page)
+    start_at = db.Column(db.DateTime)  # naive local time in Africa/Lagos (business_facts.BUSINESS_HOURS tz), not UTC
+    duration = db.Column(db.Integer, nullable=False, default=30)  # minutes
+    channel = db.Column(db.String(60))
+    status = db.Column(db.String(12), nullable=False, default="tentative")  # tentative/confirmed/declined/rescheduled
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    confirmed_by = db.Column(db.String(20))  # "owner" or "staff"
+
+    lead = db.relationship("Lead")
+
+
+class OpenQuestion(db.Model):
+    """Something the bot could not answer from its notes, recorded for Fredrick or the team to answer."""
+    __tablename__ = "open_questions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"), nullable=False, index=True)
+    kind = db.Column(db.String(20), nullable=False, default="unanswered")  # unanswered/complaint/custom_request
+    question = db.Column(db.String(500), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    lead = db.relationship("Lead")

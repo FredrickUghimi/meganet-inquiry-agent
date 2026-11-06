@@ -34,8 +34,19 @@
     </form>
   </div>
 </div>
+{% if demos or questions %}
+<div class="card">
+  {% if demos %}<h3 style="margin-top:0">Demos</h3>
+  {% for d in demos %}<div>#{{ d.id }} {{ d.start_at.strftime('%a %d %b %H:%M') if d.start_at }} (Lagos) ·
+    <span class="badge">{{ d.status }}</span>{% if d.confirmed_by %} · by {{ d.confirmed_by }}{% endif %}
+    <span class="mute">· asked: {{ d.requested_text }}</span></div>{% endfor %}{% endif %}
+  {% if questions %}<h3>Open questions</h3>
+  {% for q in questions %}<div>{{ q.kind.replace('_', ' ') }}: {{ q.question }} <span class="mute">· {{ q.created_at|local }}</span></div>{% endfor %}{% endif %}
+</div>
+{% endif %}
 <div class="card" style="margin-bottom:0">
   <h3 style="margin-top:0">Conversation</h3>
+  <div class="mute">{% if human_handled %}Handled by a person: the bot sends only a holding reply.{% else %}The bot is answering this lead.{% endif %}</div>
   <div class="msgs">
   {% for m in lead.messages %}
     <div class="msg {{ 'in' if m.direction == 'inbound' else 'out' }}{{ ' failed' if m.status == 'failed' }}" id="m{{ m.id }}">

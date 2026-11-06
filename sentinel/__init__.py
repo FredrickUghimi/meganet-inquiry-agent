@@ -8,6 +8,14 @@ from .models import db
 log = logging.getLogger(__name__)
 
 
+def _warn_todo_facts():
+    from . import business_facts
+    todo = business_facts.todo_names()
+    if todo:
+        log.warning("business_facts.py still has TODO values (the bot will say the team will confirm these): %s",
+                    ", ".join(todo))
+
+
 def _warn_missing_credentials(app):
     cfg = app.config
     missing = [k for k in ("WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_APP_SECRET") if not cfg.get(k)]
@@ -35,6 +43,7 @@ NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters ex
     ("leads", "awaiting_choice", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("leads", "needs_owner", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("messages", "choice_id", "VARCHAR(32)"),
+    ("leads", "handback_at", "TIMESTAMP"),
 )
 
 
@@ -59,6 +68,7 @@ def create_app(overrides=None):
         app.config.update(overrides)
 
     _warn_missing_credentials(app)
+    _warn_todo_facts()
     db.init_app(app)
     from . import dashboard, webhook
     app.register_blueprint(dashboard.bp)

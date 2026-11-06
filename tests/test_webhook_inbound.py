@@ -330,7 +330,8 @@ def test_successful_classification_clears_note_and_can_make_lead_ready(app, sent
             if calls["n"] == 1:
                 raise make_400()
             return text_response("```json\n" + GOOD + "\n```")
-        return text_response("Fredrick will call you.")
+        calls["d"] = calls.get("d", 0) + 1
+        return text_response(f"Fredrick will call you. Take {calls['d']}.")
 
     monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
     post(app, text_value(LEAD, mid="wamid.a"))
@@ -343,9 +344,15 @@ def test_successful_classification_clears_note_and_can_make_lead_ready(app, sent
 
 def test_dry_run_trace_shows_classification_and_draft_text(app, sent, monkeypatch):
     from sentinel import service
-    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(
-        lambda **kw: text_response(GOOD.replace("ready_demo", "exploring") if "ONE JSON object" in kw["system"]
-                                   else "Hello from Mega-Net")))
+    n = {"i": 0}
+
+    def create(**kw):
+        if "ONE JSON object" in kw["system"]:
+            return text_response(GOOD.replace("ready_demo", "exploring"))
+        n["i"] += 1
+        return text_response(f"Hello from Mega-Net {n['i']}")  # distinct each call: no repeat blocking
+
+    monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))
     post(app, text_value(LEAD, mid="wamid.a"))
     sent.clear()
     lines = []
@@ -439,7 +446,7 @@ def test_price_and_demo_message_becomes_ready_replies_without_prices_and_alerts_
 
 
 def test_reply_that_quotes_a_price_is_replaced_with_safe_text(app, monkeypatch, caplog):
-    scripted_client(monkeypatch, [("It costs ₦500,000 per month. Want a demo?", "end_turn")], classify_text=GOOD)
+    scripted_client(monkeypatch, [("It costs ₦500,000 per month. Want a demo?", "end_turn")] * 2, classify_text=GOOD)
     text = ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
     assert text == ai.FALLBACK_REPLIES["ready"] and "₦" not in text
     assert any("price or currency" in r.getMessage() for r in caplog.records)
@@ -570,7 +577,7 @@ def test_raw_classify_text_not_in_production_logs_but_in_trace(app, sent, monkey
 
 def test_pricing_rule_forbids_describing_how_price_is_set():
     rules = ai.REPLY_RULES
-    assert "ONLY that Fredrick shares pricing personally after learning about their needs" in rules
+    assert "say only the approved pricing policy" in rules
     for word in ("staff count", "number of users", "per-facility"):
         assert word in rules  # listed as things NOT to mention
     assert "size of the facility" not in ai.FALLBACK_REPLIES["ready"]

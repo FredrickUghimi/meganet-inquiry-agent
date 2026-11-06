@@ -20,6 +20,8 @@ except `DASHBOARD_PASSWORD`.
 | `WHATSAPP_APP_SECRET` | Verifies webhooks really come from Meta | Meta app > App settings > Basic > App secret | Blank until number is live (inbound webhooks are rejected while blank) |
 | `OWNER_WHATSAPP_NUMBER` | Your own WhatsApp for "lead is ready" alerts, digits only with country code, e.g. `2348012345678` | Your number | Blank until number is live |
 | `ANTHROPIC_MODEL` | Claude model used for classification and every drafted message. Default `claude-haiku-5-5`. If you set it in Render's Environment tab it overrides this default, so make sure it is a model your key can use | Preset | `claude-haiku-5-5` |
+| `OWNER_TAKEOVER_HOURS` | Hours after an owner or staff message during which the lead counts as human-handled (the bot only sends holding replies) | Preset | `48` |
+| `BOT_ANSWERS_AFTER_READY` | `1`: the bot keeps answering ready leads unless a person has taken over. `0`: old behaviour, ready means silent | Preset | `1` |
 | `HOLD_REPLY_COOLDOWN_HOURS` | Hours between automatic "Fredrick has your message" replies to a lead who is ready, paused or marked contacted | Preset | `4` |
 | `OWNER_REPLY_REMINDER_MINUTES` | Minutes before you are reminded about a waiting lead you have not answered (then every 3 hours, max 3) | Preset | `60` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM` | Optional: email a copy of every alert to you. All six must be set, otherwise email is off (silently). Port 587 uses STARTTLS, 465 uses SSL. Gmail needs an app password | Your email provider | Blank |
@@ -80,6 +82,41 @@ Rules and fallbacks:
 - Logs carry one INFO line per menu sent, tap received and fallback used (`menu lead=...`), never message text.
 - Wording and the 6-hour limit are constants in `sentinel/menu.py`. No new environment variables.
 - The app adds the new database columns by itself on start-up; nothing to run.
+
+## Ready leads, business facts and demos
+
+**Who answers.** A lead is *human-handled* if it is paused, marked contacted, or has an owner or staff message
+stored within `OWNER_TAKEOVER_HOURS` (default `48`). Resume / Reopen hands it back to the bot. "Ready" alone no longer
+silences the bot: a ready lead that is not human-handled runs the normal pipeline on every message (classify, draft
+from the product notes, business facts and history), the status stays ready, and no alert goes out unless one is
+needed. Human-handled leads keep the old behaviour: one throttled holding reply, an owner alert per waiting message,
+the Needs reply flag and reminders. Set `BOT_ANSWERS_AFTER_READY=0` to restore the old behaviour where ready means silent.
+Replying from the dashboard, `done`, `reply`, Mark contacted and Pause all switch a lead to human-handled.
+
+**Business facts.** Edit `sentinel/business_facts.py` (hours, demo days, duration, channels, notice, promises, support,
+implementation, migration, training, what is not offered). Anything left as `TODO` is unknown: the bot says the team
+will confirm it and never guesses. Startup logs one WARNING listing the TODO facts, and the dashboard **Settings** page
+shows them. `PRICING_POLICY` is the one approved pricing sentence.
+
+**Alerts only when needed.** Claude flags a complaint, a custom requirement or a question the notes do not cover. The bot
+answers safely (the team will confirm), the question is saved on the lead page under Open questions, and you get one alert
+(throttled to one per 10 minutes per lead).
+
+**Demos.** When a lead names a day and time ("Tuesday 10am", "next Tuesday at 2pm"), the bot checks it against business
+hours, minimum notice (2 hours while `DEMO_NOTICE_HOURS` is TODO) and confirmed demos. A valid slot becomes a *tentative*
+demo, the bot says it is pencilled in and not confirmed, and you get an alert. An invalid slot gets the next two or three
+open times. A vague request ("next week", "tomorrow afternoon") gets one short question. Demo times are stored in
+Africa/Lagos time.
+
+Commands you can send from the owner number:
+
+- `confirm <demo id>`: confirms the demo and tells the lead. Refused if it clashes with another confirmed demo.
+- `decline <demo id>`: declines it and offers the lead other open times.
+- `decline <demo id> <new time>` (e.g. `decline 3 Wednesday 2pm`): marks it rescheduled, proposes the new time to the lead,
+  and creates a new tentative demo. Send `confirm <new id>` once they agree.
+
+The bot never says a demo is confirmed until its status is confirmed. Confirm and decline do not hand the lead over; the
+bot keeps answering. The columns and tables are created automatically on start-up.
 
 ## 5. Render plans
 

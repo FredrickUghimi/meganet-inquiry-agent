@@ -69,6 +69,9 @@ def load_config():
         # Waiting prospects (ready / paused / contacted leads who write again)
         "HOLD_REPLY_COOLDOWN_HOURS": float(_env("HOLD_REPLY_COOLDOWN_HOURS", "4")),
         "OWNER_REPLY_REMINDER_MINUTES": float(_env("OWNER_REPLY_REMINDER_MINUTES", "60")),
+        # Who handles a lead: the bot keeps answering ready leads unless a human has taken over
+        "OWNER_TAKEOVER_HOURS": float(_env("OWNER_TAKEOVER_HOURS", "48")),
+        "BOT_ANSWERS_AFTER_READY": _flag("BOT_ANSWERS_AFTER_READY", True),
         # Optional email copy of every owner alert (all six must be set, else email is off)
         "SMTP_HOST": _env("SMTP_HOST"),
         "SMTP_PORT": int(_env("SMTP_PORT", "587")),

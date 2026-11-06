@@ -7,7 +7,8 @@ from flask import current_app
 from sqlalchemy import func
 
 from . import ai, emailer, menu, templates_meta, whatsapp
-from .models import Lead, Message, db, utcnow
+from . import business_facts, demo
+from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -187,9 +188,25 @@ MAX_REMINDERS = 3
 CLOSED = ("closed_won", "closed_lost")
 
 
+def human_handled(lead):
+    """A person owns this conversation: paused / marked contacted, or an owner or staff message was stored within
+    OWNER_TAKEOVER_HOURS (and not handed back). 'Ready' alone does not count, unless BOT_ANSWERS_AFTER_READY=0."""
+    cfg = current_app.config
+    if lead.followup_paused:
+        return True
+    if lead.status == "ready" and not cfg["BOT_ANSWERS_AFTER_READY"]:
+        return True
+    since = utcnow() - timedelta(hours=cfg["OWNER_TAKEOVER_HOURS"])
+    if lead.handback_at:
+        since = max(since, lead.handback_at)
+    return Message.query.filter(
+        Message.lead_id == lead.id, Message.direction == "outbound", Message.status != "failed",
+        db.or_(Message.sender.in_(("owner", "staff")), Message.channel == "manual"), Message.sent_at >= since).count() > 0
+
+
 def is_waiting_state(lead):
-    """Fredrick owns this conversation: ready, paused, or marked contacted (which pauses the bot)."""
-    return lead.status not in CLOSED and (lead.status == "ready" or lead.followup_paused or lead.needs_owner)
+    """Only a person answers this lead: human-handled, or flagged as needing Fredrick (chose "Something else")."""
+    return lead.status not in CLOSED and (human_handled(lead) or bool(lead.needs_owner))
 
 
 def _waiting_inbound(lead):
@@ -286,10 +303,12 @@ def run_owner_reminders(now=None):
     then every 3 hours, at most 3 per unanswered message)."""
     now = now or utcnow()
     first_after = timedelta(minutes=current_app.config["OWNER_REPLY_REMINDER_MINUTES"])
-    leads = Lead.query.filter(Lead.status.notin_(CLOSED), db.or_(Lead.status == "ready", Lead.followup_paused.is_(True))).all()
+    leads = Lead.query.filter(Lead.status.notin_(CLOSED)).all()
     for lead_id in [l.id for l in leads]:
         try:
             lead = db.session.get(Lead, lead_id)
+            if not is_waiting_state(lead):
+                continue
             since = reply_wait_since(lead)
             if since is None:
                 continue
@@ -315,6 +334,78 @@ def run_owner_reminders(now=None):
         except Exception:
             db.session.rollback()
             log.exception("Reminder failed for lead %s", lead_id)
+
+
+# --- open questions and demo scheduling ------------------------------------------------------
+
+FLAG_LABEL = {"complaint": "a complaint", "custom_request": "a custom requirement", "unanswered": "a question the bot could not answer"}
+
+
+def _record_open_question(lead, flag, question, already_alerted, say):
+    """Remember what the bot could not handle and tell Fredrick once (throttled), so a human is alerted only when needed."""
+    db.session.add(OpenQuestion(lead_id=lead.id, kind=flag, question=" ".join(str(question).split())[:500]))
+    db.session.commit()
+    now = utcnow()
+    if already_alerted or (lead.last_owner_alert_at and now - lead.last_owner_alert_at < OWNER_ALERT_THROTTLE):
+        say(f"open question recorded ({flag}); owner alert not sent (already alerted recently)")
+        return
+    sent_alert = send_owner_alert(lead, f'{lead.display_name} raised {FLAG_LABEL[flag]}: "'
+                                  f'{templates_meta.clean_param(question, 160)}"')
+    say(f"open question recorded ({flag}); owner {'alerted' if sent_alert else 'alert FAILED'}")
+
+
+def _demo_asked(lead, latest, intent):
+    """Is this message part of booking a demo? True if they ask for one, or the bot's last message offered one."""
+    if intent == "ready_demo" or ai.DEMO_WORDS.search(latest):
+        return True
+    last = (Message.query.filter_by(lead_id=lead.id, direction="outbound", status="sent")
+            .order_by(Message.sent_at.desc(), Message.id.desc()).first())
+    return bool(last and re.search(r"\bdemo\b", last.body or "", re.I))
+
+
+def _demo_flow(lead, latest, intent, newly_ready, dry_run, say):
+    """Handle a demo time request. Returns (outcome, reason) when it answered the lead, else None (normal draft)."""
+    if not lead.phone or not whatsapp.is_configured() or not window_open(lead) or not _demo_asked(lead, latest, intent):
+        return None
+    now = utcnow()
+    parsed = demo.parse(latest, now)
+    if parsed["kind"] == "none":
+        return None
+    if parsed["kind"] == "vague":
+        text, outcome = parsed["ask"], "asked"
+    else:
+        start = parsed["start"]
+        ok, why = demo.validate(start, now)
+        if ok:
+            for old in DemoRequest.query.filter_by(lead_id=lead.id, status="tentative").all():
+                old.status = "rescheduled"
+            channel = business_facts.value("DEMO_CHANNELS")
+            req = DemoRequest(lead_id=lead.id, requested_text=latest[:300], start_at=start, duration=demo.duration(),
+                              channel=None if business_facts.is_todo("DEMO_CHANNELS") else str(channel)[:60])
+            db.session.add(req)
+            db.session.commit()
+            promise = ("" if business_facts.is_todo("DEMO_CONFIRMATION_PROMISE")
+                       else f" {business_facts.value('DEMO_CONFIRMATION_PROMISE').rstrip('.')}.")
+            text = (f"Thank you. I have pencilled in {demo.fmt(start)} for a demo. It is not confirmed yet: Fredrick or "
+                    f"a member of our team will confirm it.{promise}")
+            outcome = "pencilled"
+            if not newly_ready:
+                send_owner_alert(lead, f'{lead.display_name} asked for a demo on {demo.fmt(start)} (demo {req.id}). '
+                                       f'Reply "confirm {req.id}" or "decline {req.id} [new time]".')
+            else:
+                send_owner_alert(lead, f'Demo request: {demo.fmt(start)} (demo {req.id}). Reply "confirm {req.id}" or '
+                                       f'"decline {req.id} [new time]".')
+        else:
+            slots = demo.next_slots(now)
+            text = (f"Sorry, {start:%A} {start.day} {start:%B} at {start:%H:%M} is not available. "
+                    + (f"These times are open: {demo.join_slots(slots)}. Which one suits you?" if slots
+                       else "What other day and time could work?"))
+            outcome = "offered"
+    say(f"demo flow: {outcome}")
+    msg = send_whatsapp(lead, text=text)
+    if msg.status == "failed":
+        return "failed", f"WhatsApp send failed: {msg.error}"
+    return "replied", f"demo {outcome}"
 
 
 # --- Fredrick acting on a waiting prospect (dashboard box and WhatsApp commands) -------------
@@ -372,9 +463,66 @@ def owner_reply(lead, text, quote=None):
     return True, "Reply sent. Lead marked contacted; the bot is paused for them." + note
 
 
-COMMANDS = ("done", "reply", "list", "help")
+COMMANDS = ("done", "reply", "list", "help", "confirm", "decline")
 HELP_TEXT = ('Commands:\n"list": leads waiting for you\n"done <id>": mark contacted\n'
-             '"reply <id> <text>": send text to the lead\n"help": this list')
+             '"reply <id> <text>": send text to the lead\n"confirm <demo id>": confirm a demo\n'
+             '"decline <demo id> [new time]": decline or reschedule a demo\n"help": this list')
+
+
+def _tell_lead(lead, text):
+    """Free-form message from the bot to the lead inside the 24h window. Returns True if it was sent."""
+    if not lead.phone or not whatsapp.is_configured() or not window_closes_at(lead):
+        return False
+    return send_whatsapp(lead, text=text).status != "failed"
+
+
+def _demo_command(cmd, arg, rest):
+    try:
+        req = db.session.get(DemoRequest, int(arg.lstrip("#")))
+    except ValueError:
+        req = None
+    if not arg:
+        return f"Usage: {cmd} <demo id>" + (" [new time]" if cmd == "decline" else "")
+    if req is None:
+        return f'No demo with id "{arg[:20]}".'
+    lead, now = req.lead, utcnow()
+    if req.status in ("declined", "rescheduled"):
+        return f"Demo {req.id} is already {req.status}."
+    if cmd == "confirm":
+        if req.status == "confirmed":
+            return f"Demo {req.id} is already confirmed."
+        ok, why = demo.validate(req.start_at, now, exclude_id=req.id) if req.start_at else (False, "no time set")
+        if not ok and why == "already taken":
+            return f"Cannot confirm: demo {req.id} clashes with another confirmed demo. Decline it with a new time."
+        req.status, req.confirmed_by = "confirmed", "owner"
+        db.session.commit()
+        told = _tell_lead(lead, f"Good news: your demo is confirmed for {demo.fmt(req.start_at)}. We look forward to it.")
+        return (f"Confirmed demo {req.id}: {lead.display_name}, {demo.fmt(req.start_at)}. "
+                + ("Lead told." if told else "Window closed: message them yourself."))
+    # decline [new time]
+    parsed = demo.parse(rest, now) if rest.strip() else {"kind": "none"}
+    if rest.strip() and parsed["kind"] != "slot":
+        return "Could not read the new time. Nothing changed. Example: decline 3 Tuesday 2pm"
+    if parsed["kind"] == "slot":
+        ok, why = demo.validate(parsed["start"], now)
+        if not ok:
+            return f"That new time is {why}. Nothing changed."
+        req.status = "rescheduled"
+        new = DemoRequest(lead_id=lead.id, requested_text="Proposed by Fredrick", start_at=parsed["start"],
+                          duration=demo.duration(), channel=req.channel)
+        db.session.add(new)
+        db.session.commit()
+        told = _tell_lead(lead, f"Sorry, {demo.fmt(req.start_at)} does not work for us. Would {demo.fmt(new.start_at)} "
+                                "suit you instead?")
+        return (f"Demo {req.id} rescheduled. Proposed demo {new.id}: {demo.fmt(new.start_at)}. "
+                f'Send "confirm {new.id}" once {lead.display_name} agrees. ' + ("Lead asked." if told else "Window closed: message them yourself."))
+    req.status = "declined"
+    db.session.commit()
+    slots = demo.next_slots(now)
+    told = _tell_lead(lead, f"Sorry, {demo.fmt(req.start_at)} is not available. "
+                            + (f"These times are open: {demo.join_slots(slots)}. Which one suits you?" if slots
+                               else "What other day and time could work?"))
+    return f"Declined demo {req.id}. " + ("Lead offered other times." if told else "Window closed: message them yourself.")
 
 
 def is_owner_command(text):
@@ -406,6 +554,8 @@ def owner_command(text):
                  f"{ai.PRODUCT_LABELS[l.product_interest]}" for w, l in rows[:5]]
         more = f"\n(+{len(rows) - 5} more)" if len(rows) > 5 else ""
         return cmd, "Needs a reply:\n" + "\n".join(lines) + more
+    if cmd in ("confirm", "decline"):
+        return cmd, _demo_command(cmd, arg, parts[2] if len(parts) > 2 else "")
     lead = _lead_from_arg(arg)
     if not arg:
         return cmd, f"Usage: {cmd} <id>" + (" <text>" if cmd == "reply" else "")
@@ -588,11 +738,20 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
 
     if not lead.phone:
         return "skipped", "lead has no phone"
-    if lead.followup_paused or (was_ready and new_status == "ready"):
+    if human_handled(lead):
         return _waiting_reply(lead, newly_ready, dry_run, say)
-    if first_contact:
+    flag = result.get("flag")
+    if flag and not dry_run:
+        _record_open_question(lead, flag, result.get("question") or latest, newly_ready, say)
+    if not dry_run:
+        done = _demo_flow(lead, latest, intent, newly_ready, dry_run, say)
+        if done:
+            return done
+    if flag:
+        situation = flag
+    elif first_contact:
         situation = "first_contact"
-    elif newly_ready:
+    elif newly_ready or (new_status == "ready" and intent in ("ready_demo", "ready_pricing")):
         situation = "ready"
     elif new_status == "closed_lost":
         situation = "not_fit"
