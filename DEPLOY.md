@@ -217,6 +217,16 @@ first-contact menu.
 - **Web service: Starter or higher (always on).** Free instances sleep after idle. A sleeping service misses Meta webhooks and its in-process follow-up scheduler stops. The service must also run exactly **one** worker (already set), or follow-ups would be sent twice.
 - **Postgres: paid (`basic-256mb`).** Render's free database expires after about 30 days and is deleted. Leads must not disappear.
 
+## Check which version is running
+
+If the bot behaves like an old release (for example it repeats a scripted line that was removed), the first thing to check is
+that the latest commit is actually deployed. Open the dashboard **Settings** page: **Running commit** shows the first 7
+characters of the commit Render built (from `RENDER_GIT_COMMIT`); it should match the latest commit on `main` on GitHub. The
+same value is logged at start-up as `Lead Sentinel starting, commit=...`. In Render, the service's **Events** tab also lists
+each deploy and its commit. If the commit is old, tap **Manual Deploy > Deploy latest commit** (or turn on Auto-Deploy for
+the `main` branch). Messages already stored in the database are never re-sent, and retired scripted lines are blocked even if
+an old conversation contains them.
+
 ## Troubleshooting: "messages arrive but nothing happens"
 
 Every `POST /webhook` event writes one INFO log line: `webhook event kind=... sender=234*******78 phone_number_id=... outcome=...`, and the auto-reply step writes a `reply lead=... outcome=...` line. Search the Render logs for `webhook event` and read the `outcome`. Common reasons:

@@ -46,6 +46,8 @@ def load_config():
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
         "SESSION_COOKIE_SECURE": _flag("SESSION_COOKIE_SECURE", True),
+        # Which build is running (Render sets RENDER_GIT_COMMIT); shown on the Settings page and logged at start-up
+        "GIT_COMMIT": (_env("RENDER_GIT_COMMIT") or _env("SOURCE_VERSION") or _env("GIT_COMMIT") or "")[:40],
         # Dashboard
         "DASHBOARD_PASSWORD": _env("DASHBOARD_PASSWORD"),
         "DISPLAY_TZ": _env("DISPLAY_TZ", "UTC"),

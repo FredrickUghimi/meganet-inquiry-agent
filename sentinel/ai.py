@@ -35,12 +35,23 @@ def _get_client():
     return _client
 
 
+# Scripted lines from retired releases. They must never be sent again, and they must not teach Claude to copy them, because
+# conversations already in the database still contain them.
+RETIRED_FRAGMENTS = ("shared the demo video with you earlier",)
+
+
+def is_retired(text):
+    low = (text or "").lower()
+    return any(f in low for f in RETIRED_FRAGMENTS)
+
+
 def _transcript(messages, limit=30):
     lines = []
     for m in messages[-limit:]:
         if m.status == "failed" or m.channel == "manual":
             continue  # never delivered / an internal dashboard note, so the lead never saw it
-        lines.append(f"{'Lead' if m.direction == 'inbound' else 'Mega-Net'}: {m.body}")
+        body = "(an earlier automatic message)" if m.direction == "outbound" and is_retired(m.body) else m.body
+        lines.append(f"{'Lead' if m.direction == 'inbound' else 'Mega-Net'}: {body}")
     return "\n".join(lines) or "(no messages yet)"
 
 
@@ -437,6 +448,11 @@ def _norm(text):
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
+def question_count(text):
+    """Question marks in a reply, not counting the ?si= inside a video link."""
+    return re.sub(r"(?:https?://|www\.)\S+", "", text or "").count("?")
+
+
 def similarity(a, b):
     """0..1 similarity of two messages after dropping case and punctuation."""
     return difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio()
@@ -470,7 +486,7 @@ def _last_bot_text(messages):
     return None
 
 
-FALLBACK_ALTERNATIVE = "Is there anything else you would like to know, or shall we find a time for a short demo?"
+FALLBACK_ALTERNATIVE = "Thanks for your message. Is there anything else you would like to know?"
 
 
 def _not_repeat(text, messages):
@@ -614,11 +630,14 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
         if situation == "first_product_reply":
             if len(text.split()) > FIRST_REPLY_MAX_WORDS:
                 problems.append(("long", f"Your last attempt was over {FIRST_REPLY_MAX_WORDS} words. Shorten it."))
-            if text.count("?") > 1:
+            if question_count(text) > 1:
                 problems.append(("questions", "Your last attempt asked more than one question. End with at most one."))
         if claims_confirmed(text):
             problems.append(("confirmed", "Your last attempt said a demo is confirmed or booked. Only the team confirms. "
                                           "Say it is pencilled in and the team will confirm."))
+        if is_retired(text):
+            problems.append(("retired", "Your last attempt repeated a retired scripted line. Write a fresh reply that "
+                                        "answers the customer's latest message."))
         if repeats(text, messages):
             problems.append(("repeat", "Your last attempt repeated something you already sent in the last day. Say "
                                        "something different that answers the customer's latest message."))
@@ -627,8 +646,8 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             info["retried"] = True
             turn2, stop2 = gen("\n" + " ".join(p[1] for p in problems))
             t2 = turn2["reply"]
-            bad2 = (any(b in t2.lower() for b in BANNED_PHRASES)
-                    or (situation == "first_product_reply" and (len(t2.split()) > FIRST_REPLY_MAX_WORDS or t2.count("?") > 1)))
+            bad2 = (is_retired(t2) or any(b in t2.lower() for b in BANNED_PHRASES)
+                    or (situation == "first_product_reply" and (len(t2.split()) > FIRST_REPLY_MAX_WORDS or question_count(t2) > 1)))
             if not t2 or stop2 == "max_tokens" or _PRICE_RE.search(t2) or claims_confirmed(t2) or repeats(t2, messages) or bad2:
                 kinds = ",".join(p[0] for p in problems)
                 log.warning("claude draft_reply still failed the guard (%s); using the fixed fallback text", kinds)
@@ -661,7 +680,7 @@ def regenerate_message(lead, messages, original):
         + REPLY_RULES + "\nMessage that must not be repeated:\n" + original[:800], REPLY_MAX_TOKENS)
     if not text or stop == "max_tokens":
         raise RuntimeError("regeneration produced no usable text")
-    if _PRICE_RE.search(text) or claims_confirmed(text):
+    if _PRICE_RE.search(text) or claims_confirmed(text) or is_retired(text):
         raise RuntimeError("regeneration broke a guard")
     return text
 

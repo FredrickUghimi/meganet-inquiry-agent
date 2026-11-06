@@ -79,6 +79,7 @@ def create_app(overrides=None):
 
     _warn_missing_credentials(app)
     _warn_todo_facts()
+    log.info("Lead Sentinel starting, commit=%s", app.config.get("GIT_COMMIT") or "unknown")
     db.init_app(app)
     from . import dashboard, webhook
     app.register_blueprint(dashboard.bp)

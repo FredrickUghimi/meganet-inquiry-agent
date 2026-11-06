@@ -183,7 +183,8 @@ def settings():
     from . import business_facts as bf
     cfg = current_app.config
     facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.FACTS]
-    modes = [("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
+    modes = [("Running commit", (cfg.get("GIT_COMMIT") or "unknown")[:7]),
+             ("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
              ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"])]
     todo = [label for label, _, is_todo in facts if is_todo]
     return render_template("settings.html", facts=facts, modes=modes, todo=todo)
