@@ -38,6 +38,9 @@ class Lead(db.Model):
     menu_sent_at = db.Column(db.DateTime)  # last first-contact tap menu (6h no-repeat rule)
     awaiting_choice = db.Column(db.Boolean, nullable=False, default=False)  # menu sent, no choice yet
     needs_owner = db.Column(db.Boolean, nullable=False, default=False)  # chose "Something else": Fredrick must answer
+    demo_state = db.Column(db.String(12))  # demo workflow: offered / collecting / choosing; null = not in the workflow
+    is_existing_client = db.Column(db.Boolean, nullable=False, default=False)  # already uses Mega-Net: support, not sales
+    existing_alerted_at = db.Column(db.DateTime)  # owner told once that this lead is an existing client
     handback_at = db.Column(db.DateTime)  # Fredrick handed the lead back to the bot (resume/reopen)
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
@@ -80,9 +83,12 @@ class DemoRequest(db.Model):
     start_at = db.Column(db.DateTime)  # naive local time in Africa/Lagos (business_facts.BUSINESS_HOURS tz), not UTC
     duration = db.Column(db.Integer, nullable=False, default=30)  # minutes
     channel = db.Column(db.String(60))
-    status = db.Column(db.String(12), nullable=False, default="tentative")  # tentative/confirmed/declined/rescheduled
+    status = db.Column(db.String(12), nullable=False, default="tentative")  # draft (collecting details)/tentative/confirmed/declined/rescheduled
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     confirmed_by = db.Column(db.String(20))  # "owner" or "staff"
+    contact_name = db.Column(db.String(120))  # collected for a personalised demo
+    organisation = db.Column(db.String(160))
+    contact_phone = db.Column(db.String(40))
 
     lead = db.relationship("Lead")
 

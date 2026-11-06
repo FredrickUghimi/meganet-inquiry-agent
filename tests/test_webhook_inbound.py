@@ -395,7 +395,7 @@ def outbound_texts():
 def test_max_tokens_cut_off_is_retried_and_never_sent_mid_sentence(app, sent, monkeypatch, caplog):
     cut = "Thanks, Fred. EHR Cloud keeps patient records in one digital registry, so the paper files are replaced. Billing is built around"
     scripted_client(monkeypatch, [(cut, "max_tokens"), ("Fredrick shares pricing personally. What day suits you for a demo?", "end_turn")],
-                    classify_text=GOOD)
+                    classify_text=GOOD.replace("ready_demo", "exploring"))
     post(app, text_value(LEAD))
     assert sent[-1][2] == "Fredrick shares pricing personally. What day suits you for a demo?"
     assert any("hit max_tokens" in r.getMessage() for r in caplog.records)

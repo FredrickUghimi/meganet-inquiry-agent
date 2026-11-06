@@ -108,6 +108,13 @@ def leads():
     return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status)
 
 
+@bp.get("/demos")
+@login_required
+def demos():
+    rows = DemoRequest.query.order_by(DemoRequest.id.desc()).all()
+    return render_template("demos.html", demos=rows)
+
+
 @bp.get("/settings")
 @login_required
 def settings():
@@ -117,7 +124,8 @@ def settings():
     facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.FACTS]
     modes = [("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
              ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"])]
-    return render_template("settings.html", facts=facts, modes=modes)
+    todo = [label for label, _, is_todo in facts if is_todo]
+    return render_template("settings.html", facts=facts, modes=modes, todo=todo)
 
 
 @bp.get("/leads/<int:lead_id>")
@@ -151,7 +159,7 @@ def owner_reply(lead_id):
     return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 
 
-ACTIONS = {"contacted", "closed_won", "closed_lost", "pause", "resume", "reopen"}
+ACTIONS = {"contacted", "closed_won", "closed_lost", "pause", "resume", "reopen", "existing_client"}
 
 
 @bp.post("/leads/<int:lead_id>/action")
@@ -165,6 +173,9 @@ def lead_action(lead_id):
     if action == "contacted":
         # You are talking to them now: log it, pause the bot's follow-ups and auto-replies.
         service.mark_contacted(lead)
+    elif action == "existing_client":  # toggle: existing clients get the support route, not sales flows
+        lead.is_existing_client = not lead.is_existing_client
+        lead.next_followup_at = None if lead.is_existing_client else service.next_followup_time(lead)
     elif action in ("closed_won", "closed_lost"):
         lead.status = action
         lead.next_followup_at = None

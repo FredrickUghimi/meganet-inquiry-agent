@@ -51,7 +51,7 @@ def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp")
 
 def next_followup_time(lead):
     """When the next stage is due, or None if the sequence should not run."""
-    if lead.status not in ACTIVE or lead.followup_paused or not lead.phone:
+    if lead.status not in ACTIVE or lead.followup_paused or not lead.phone or lead.is_existing_client:
         return None
     nxt = next((s for s in STAGES if s > lead.followup_stage), None)
     if nxt is None:
@@ -290,7 +290,7 @@ def _waiting_reply(lead, newly_ready, dry_run, say):
         return "skipped", why + "; 24h window closed, cannot send free-form holding reply"
     if dry_run:
         return "skipped", why + "; dry run: would send the holding reply"
-    msg = send_whatsapp(lead, text=holding_text(lead))
+    msg = send_whatsapp(lead, text=holding_text(lead) + demo.team_note(now))
     if msg.status == "failed":
         return "failed", f"holding reply send failed: {msg.error}"
     lead.last_hold_reply_at = now
@@ -355,7 +355,7 @@ def _record_open_question(lead, flag, question, already_alerted, say):
 
 
 def _demo_asked(lead, latest, intent):
-    """Is this message part of booking a demo? True if they ask for one, or the bot's last message offered one."""
+    """Is this message about booking a demo? True if they ask for one, or the bot's last message offered one."""
     if intent == "ready_demo" or ai.DEMO_WORDS.search(latest):
         return True
     last = (Message.query.filter_by(lead_id=lead.id, direction="outbound", status="sent")
@@ -363,49 +363,210 @@ def _demo_asked(lead, latest, intent):
     return bool(last and re.search(r"\bdemo\b", last.body or "", re.I))
 
 
-def _demo_flow(lead, latest, intent, newly_ready, dry_run, say):
-    """Handle a demo time request. Returns (outcome, reason) when it answered the lead, else None (normal draft)."""
-    if not lead.phone or not whatsapp.is_configured() or not window_open(lead) or not _demo_asked(lead, latest, intent):
-        return None
+# One-line descriptions use only what PRODUCT_NOTES says about each product; never what a video contains.
+VIDEO_BLURB = {"ehr_cloud": "our cloud electronic health records system for clinics and hospitals",
+               "erp_cloud": "our cloud ERP for businesses (operations, finance and inventory)"}
+PERSONALISED_QUESTION = "Would you also like a personalised demonstration with our team?"
+DEMO_STATE_TTL = timedelta(hours=24)
+
+
+def _video_sent_recently(lead, url):
+    cutoff = utcnow() - timedelta(hours=24)
+    return Message.query.filter(Message.lead_id == lead.id, Message.direction == "outbound", Message.status != "failed",
+                                Message.sent_at >= cutoff, Message.body.contains(url)).count() > 0
+
+
+def _video_text(lead):
+    """Step (a)+(b): the demo video(s) for the lead's product with a one-line description, then the question.
+    The same video is not sent to the same lead twice within 24 hours."""
+    products = [lead.product_interest] if lead.product_interest in VIDEO_BLURB else list(VIDEO_BLURB)
+    parts = []
+    for p in products:
+        label, url = business_facts.video_for(p)
+        if not _video_sent_recently(lead, url):
+            parts.append(f"{label} demo video: {url}\nThis video introduces {label}, {VIDEO_BLURB[p]}.")
+    intro = "\n\n".join(parts) if parts else "I shared the demo video with you earlier in this chat."
+    return f"{intro}\n\n{PERSONALISED_QUESTION}"
+
+
+def _draft_demo(lead):
+    d = DemoRequest.query.filter_by(lead_id=lead.id, status="draft").order_by(DemoRequest.id.desc()).first()
+    if d is None:
+        d = DemoRequest(lead_id=lead.id, requested_text="", status="draft", duration=demo.duration())
+        db.session.add(d)
+        db.session.flush()
+    return d
+
+
+def _collect_details(lead, d, history):
+    """Fill the draft with whatever the lead has told us; returns the list of fields still missing."""
+    got = ai.extract_demo_details(lead, history) or {}
+    recent = [m.body for m in history if m.direction == "inbound"][-6:]
+    det_phone = next((p for p in (demo.phone_in(t) for t in reversed(recent)) if p), None)
+    det_channel = next((c for c in (demo.channel_in(t) for t in reversed(recent)) if c), None)
+    d.contact_name = d.contact_name or got.get("name") or lead.name
+    d.organisation = d.organisation or got.get("organisation")
+    d.contact_phone = d.contact_phone or got.get("phone") or det_phone or lead.phone
+    d.channel = d.channel or demo.CHANNEL_NAMES.get(got.get("channel")) or det_channel
+    if d.contact_name and not lead.name:
+        lead.name = d.contact_name[:120]
+    return [label for label, val in (("your name", d.contact_name), ("your organisation", d.organisation),
+                                     ("your phone number", d.contact_phone),
+                                     ("your preferred channel (WhatsApp video call or Google Meet)", d.channel))
+            if not val]
+
+
+def _staff_alert(line):
+    """Free-form WhatsApp to each configured staff member (best effort; never raises)."""
+    if not whatsapp.is_configured():
+        return
+    for number in current_app.config["STAFF_WHATSAPP_NUMBERS"]:
+        try:
+            whatsapp.send_text(number, line)
+        except Exception as exc:
+            log.warning("staff alert to %s failed: %s", mask_phone(number), exc)
+
+
+def _pencil(lead, d, start, now):
+    """Turn the draft into a tentative demo, alert Fredrick and staff, and return the reply to the lead."""
+    for old in DemoRequest.query.filter(DemoRequest.lead_id == lead.id, DemoRequest.status == "tentative",
+                                        DemoRequest.id != d.id).all():
+        old.status = "rescheduled"
+    d.status, d.start_at, d.duration = "tentative", start, demo.duration()
+    d.requested_text = (d.requested_text or f"Personalised demo, {d.channel}")[:300]
+    lead.demo_state = None
+    db.session.commit()
+    line = (f'{d.contact_name or lead.display_name} ({d.organisation or "no organisation given"}) wants a personalised '
+            f'demo: {demo.fmt(start)} by {d.channel}, phone {d.contact_phone}. Demo {d.id}. Reply "confirm {d.id}" or '
+            f'"decline {d.id} [new time]".')
+    send_owner_alert(lead, line)
+    _staff_alert(line)
+    log.info("demo lead=%s request=%s pencilled (tentative)", lead.id, d.id)
+    first = (d.contact_name or "").split(" ")[0]
+    promise = business_facts.value("DEMO_CONFIRMATION_PROMISE").strip()
+    return (f"Thank you{', ' + first if first else ''}. I have pencilled in {demo.fmt(start)} for a "
+            f"{demo.duration()}-minute demo by {d.channel}. Personalised demos are held on {demo.rule_text()}. "
+            f"This is not confirmed yet: the team must approve it. {promise}{demo.team_note(now)}")
+
+
+def _recent_slot(history):
+    """The newest day/time the lead named in their recent messages, as parsed by demo.parse, or None."""
     now = utcnow()
-    parsed = demo.parse(latest, now)
-    if parsed["kind"] == "none":
+    for m in reversed([m for m in history if m.direction == "inbound"][-6:]):
+        p = demo.parse(m.body, now)
+        if p["kind"] == "slot":
+            return p["start"]
+    return None
+
+
+def _demo_flow(lead, latest, intent, newly_ready, dry_run, say):
+    """The demo workflow. Returns (outcome, reason) when it answered the lead, else None (normal draft).
+    States on lead.demo_state: offered (video sent, asked about a personalised demo), collecting (asking for
+    name/organisation/channel), choosing (details complete, the lead must pick one of the offered days).
+    Nothing here ever says a demo is confirmed; only the `confirm <id>` command does that."""
+    if not lead.phone or not whatsapp.is_configured() or not window_open(lead):
         return None
-    if parsed["kind"] == "vague":
-        text, outcome = parsed["ask"], "asked"
-    else:
-        start = parsed["start"]
-        ok, why = demo.validate(start, now)
-        if ok:
-            for old in DemoRequest.query.filter_by(lead_id=lead.id, status="tentative").all():
-                old.status = "rescheduled"
-            channel = business_facts.value("DEMO_CHANNELS")
-            req = DemoRequest(lead_id=lead.id, requested_text=latest[:300], start_at=start, duration=demo.duration(),
-                              channel=None if business_facts.is_todo("DEMO_CHANNELS") else str(channel)[:60])
-            db.session.add(req)
-            db.session.commit()
-            promise = ("" if business_facts.is_todo("DEMO_CONFIRMATION_PROMISE")
-                       else f" {business_facts.value('DEMO_CONFIRMATION_PROMISE').rstrip('.')}.")
-            text = (f"Thank you. I have pencilled in {demo.fmt(start)} for a demo. It is not confirmed yet: Fredrick or "
-                    f"a member of our team will confirm it.{promise}")
-            outcome = "pencilled"
-            if not newly_ready:
-                send_owner_alert(lead, f'{lead.display_name} asked for a demo on {demo.fmt(start)} (demo {req.id}). '
-                                       f'Reply "confirm {req.id}" or "decline {req.id} [new time]".')
-            else:
-                send_owner_alert(lead, f'Demo request: {demo.fmt(start)} (demo {req.id}). Reply "confirm {req.id}" or '
-                                       f'"decline {req.id} [new time]".')
+    now, history = utcnow(), list(lead.messages)
+    last_out = (Message.query.filter_by(lead_id=lead.id, direction="outbound", status="sent")
+                .order_by(Message.sent_at.desc(), Message.id.desc()).first())
+    if lead.demo_state and (not last_out or now - last_out.sent_at > DEMO_STATE_TTL):
+        lead.demo_state = None
+    state = lead.demo_state
+    text = None
+    if state == "offered" and demo.yes_no(latest) is None and re.search(r"\b(demo|video)\b", latest, re.I):
+        state = lead.demo_state = None  # asking for the demo or video again: start the workflow again
+
+    if state is None:
+        if not _demo_asked(lead, latest, intent):
+            return None
+        if demo.prefers_team(latest):
+            state = "collecting"  # straight to the team, no video first
         else:
-            slots = demo.next_slots(now)
-            text = (f"Sorry, {start:%A} {start.day} {start:%B} at {start:%H:%M} is not available. "
-                    + (f"These times are open: {demo.join_slots(slots)}. Which one suits you?" if slots
-                       else "What other day and time could work?"))
-            outcome = "offered"
-    say(f"demo flow: {outcome}")
+            text = _video_text(lead)
+            asked = _recent_slot(history)
+            if asked and not demo.validate(asked, now, lead_id=lead.id)[0]:
+                text += "\n\n" + demo.redirect_text(now, lead.id, asked)
+            lead.demo_state = "offered"
+    elif state == "offered":
+        answer = demo.yes_no(latest)
+        if answer == "no":
+            lead.demo_state = None
+            text = "No problem. If you would like a personalised demonstration with our team later, just tell me."
+        elif answer == "yes":
+            state = "collecting"
+        else:
+            return None
+
+    if text is None and state == "collecting":
+        d = _draft_demo(lead)
+        missing = _collect_details(lead, d, history)
+        if missing:
+            lead.demo_state = "collecting"
+            text = ("To arrange it, please send " + (", ".join(missing[:-1]) + " and " + missing[-1] if len(missing) > 1
+                                                       else missing[0]) + ".")
+        else:
+            asked = _recent_slot(history)
+            if asked and not demo.validate(asked, now, lead_id=lead.id)[0]:
+                lead.demo_state = "choosing"
+                text = demo.redirect_text(now, lead.id, asked)
+            else:
+                start = asked or next(iter(demo.next_slots(now, 1, lead.id)), None)
+                if start is None:
+                    lead.demo_state = None
+                    send_owner_alert(lead, f"{lead.display_name} wants a personalised demo but no Wednesday is free.")
+                    text = "I will ask the team for the next available date and come back to you."
+                else:
+                    text = _pencil(lead, d, start, now)
+    elif text is None and state == "choosing":
+        d = _draft_demo(lead)
+        options = demo.next_slots(now, 2, lead.id)
+        parsed = demo.parse(latest, now)
+        low = latest.lower()
+        pick = None
+        if parsed["kind"] == "slot" and demo.validate(parsed["start"], now, lead_id=lead.id)[0]:
+            pick = parsed["start"]
+        elif options and re.search(r"\b(second|2nd|2)\b", low) and len(options) > 1:
+            pick = options[1]
+        elif options and (re.search(r"\b(first|1st|1|either|any)\b", low) or demo.yes_no(latest) == "yes"):
+            pick = options[0]
+        if pick:
+            text = _pencil(lead, d, pick, now)
+        else:
+            text = demo.redirect_text(now, lead.id, parsed.get("start") if parsed["kind"] == "slot" else None)
+
+    db.session.commit()
+    say(f"demo flow: state={lead.demo_state}")
     msg = send_whatsapp(lead, text=text)
     if msg.status == "failed":
         return "failed", f"WhatsApp send failed: {msg.error}"
-    return "replied", f"demo {outcome}"
+    return "replied", f"demo {lead.demo_state or 'done'}"
+
+
+# --- existing clients -------------------------------------------------------------------------
+
+def support_reply_text(now=None):
+    return (f"Thank you for being a Mega-Net client. {business_facts.SUPPORT_ROUTE_FOR_EXISTING_CLIENTS} "
+            f"Support hours: {business_facts.SUPPORT_HOURS}" + demo.team_note(now or utcnow()))
+
+
+def _existing_client_reply(lead, dry_run, why):
+    """Existing clients get the support route, not sales flows or menus. Alerts Fredrick once; logs it."""
+    log.info("existing client lead=%s (%s): support reply, no sales flow", lead.id, why)
+    if dry_run:
+        return "skipped", "dry run: existing client, would send the support route"
+    if not lead.existing_alerted_at:
+        send_owner_alert(lead, f"{lead.display_name} is an existing client and wrote in. I gave them the support route.")
+        lead.existing_alerted_at = utcnow()
+        db.session.commit()
+    if not (lead.phone and whatsapp.is_configured() and window_open(lead)):
+        return "skipped", "existing client; no open WhatsApp window for the support reply"
+    text = support_reply_text()
+    last = (Message.query.filter_by(lead_id=lead.id, direction="outbound", status="sent")
+            .order_by(Message.sent_at.desc(), Message.id.desc()).first())
+    if last and last.body == text and utcnow() - last.sent_at < timedelta(hours=6):
+        return "skipped", "existing client; support route already sent in the last 6 hours"
+    msg = send_whatsapp(lead, text=text)
+    return ("failed", f"WhatsApp send failed: {msg.error}") if msg.status == "failed" else ("replied", "existing client support")
 
 
 # --- Fredrick acting on a waiting prospect (dashboard box and WhatsApp commands) -------------
@@ -464,6 +625,7 @@ def owner_reply(lead, text, quote=None):
 
 
 COMMANDS = ("done", "reply", "list", "help", "confirm", "decline")
+STAFF_COMMANDS = ("confirm", "decline", "help")  # what staff numbers may send
 HELP_TEXT = ('Commands:\n"list": leads waiting for you\n"done <id>": mark contacted\n'
              '"reply <id> <text>": send text to the lead\n"confirm <demo id>": confirm a demo\n'
              '"decline <demo id> [new time]": decline or reschedule a demo\n"help": this list')
@@ -476,7 +638,7 @@ def _tell_lead(lead, text):
     return send_whatsapp(lead, text=text).status != "failed"
 
 
-def _demo_command(cmd, arg, rest):
+def _demo_command(cmd, arg, rest, by="owner"):
     try:
         req = db.session.get(DemoRequest, int(arg.lstrip("#")))
     except ValueError:
@@ -491,10 +653,13 @@ def _demo_command(cmd, arg, rest):
     if cmd == "confirm":
         if req.status == "confirmed":
             return f"Demo {req.id} is already confirmed."
-        ok, why = demo.validate(req.start_at, now, exclude_id=req.id) if req.start_at else (False, "no time set")
-        if not ok and why == "already taken":
+        if req.status == "draft" or not req.start_at:
+            return f"Demo {req.id} has no time yet, so it cannot be confirmed."
+        taken = sum(1 for d in DemoRequest.query.filter_by(status="confirmed").all()
+                    if d.id != req.id and d.start_at and d.start_at.date() == req.start_at.date())
+        if taken >= demo.slots_per_session():
             return f"Cannot confirm: demo {req.id} clashes with another confirmed demo. Decline it with a new time."
-        req.status, req.confirmed_by = "confirmed", "owner"
+        req.status, req.confirmed_by = "confirmed", by
         db.session.commit()
         told = _tell_lead(lead, f"Good news: your demo is confirmed for {demo.fmt(req.start_at)}. We look forward to it.")
         return (f"Confirmed demo {req.id}: {lead.display_name}, {demo.fmt(req.start_at)}. "
@@ -504,9 +669,9 @@ def _demo_command(cmd, arg, rest):
     if rest.strip() and parsed["kind"] != "slot":
         return "Could not read the new time. Nothing changed. Example: decline 3 Tuesday 2pm"
     if parsed["kind"] == "slot":
-        ok, why = demo.validate(parsed["start"], now)
+        ok, why = demo.validate(parsed["start"], now, exclude_id=req.id, lead_id=lead.id)
         if not ok:
-            return f"That new time is {why}. Nothing changed."
+            return f"That new time is not possible ({why}); demos run on {demo.rule_text()}. Nothing changed."
         req.status = "rescheduled"
         new = DemoRequest(lead_id=lead.id, requested_text="Proposed by Fredrick", start_at=parsed["start"],
                           duration=demo.duration(), channel=req.channel)
@@ -518,10 +683,10 @@ def _demo_command(cmd, arg, rest):
                 f'Send "confirm {new.id}" once {lead.display_name} agrees. ' + ("Lead asked." if told else "Window closed: message them yourself."))
     req.status = "declined"
     db.session.commit()
-    slots = demo.next_slots(now)
+    slots = demo.next_slots(now, 2, lead.id)
     told = _tell_lead(lead, f"Sorry, {demo.fmt(req.start_at)} is not available. "
-                            + (f"These times are open: {demo.join_slots(slots)}. Which one suits you?" if slots
-                               else "What other day and time could work?"))
+                            + (f"The next available are {demo.join_slots(slots)}. Which would you prefer?" if slots
+                               else "The team will suggest another date."))
     return f"Declined demo {req.id}. " + ("Lead offered other times." if told else "Window closed: message them yourself.")
 
 
@@ -537,7 +702,7 @@ def _lead_from_arg(arg):
         return None
 
 
-def owner_command(text):
+def owner_command(text, by="owner"):
     """Run one owner command. Returns (command_name, confirmation_text_for_Fredrick)."""
     parts = text.strip().split(None, 2)
     cmd = parts[0].lower().rstrip(":")
@@ -555,7 +720,7 @@ def owner_command(text):
         more = f"\n(+{len(rows) - 5} more)" if len(rows) > 5 else ""
         return cmd, "Needs a reply:\n" + "\n".join(lines) + more
     if cmd in ("confirm", "decline"):
-        return cmd, _demo_command(cmd, arg, parts[2] if len(parts) > 2 else "")
+        return cmd, _demo_command(cmd, arg, parts[2] if len(parts) > 2 else "", by)
     lead = _lead_from_arg(arg)
     if not arg:
         return cmd, f"Usage: {cmd} <id>" + (" <text>" if cmd == "reply" else "")
@@ -576,11 +741,11 @@ def owner_command(text):
     return cmd, detail
 
 
-def run_owner_command(text):
-    """Execute an owner command and text the result back to Fredrick."""
-    owner = current_app.config["OWNER_WHATSAPP_NUMBER"]
+def run_owner_command(text, sender=None, by="owner"):
+    """Execute an owner (or staff) command and text the result back to whoever sent it."""
+    owner = sender or current_app.config["OWNER_WHATSAPP_NUMBER"]
     try:
-        cmd, answer = owner_command(text)
+        cmd, answer = owner_command(text, by)
     except Exception:
         db.session.rollback()
         log.exception("Owner command failed")
@@ -656,6 +821,14 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if lead.status in ("closed_won", "closed_lost"):
         return "skipped", f"lead is {lead.status}; no auto-reply (reopen it on the dashboard)"
 
+    if lead.phone in current_app.config["EXISTING_CLIENT_NUMBERS"] and not lead.is_existing_client and not dry_run:
+        lead.is_existing_client = True
+        lead.next_followup_at = None
+        db.session.commit()
+        log.info("existing client lead=%s flagged by EXISTING_CLIENT_NUMBERS", lead_id)
+    if lead.is_existing_client and not human_handled(lead):
+        return _existing_client_reply(lead, dry_run, "flagged")
+
     if not dry_run and not retry:
         history = list(lead.messages)
         choice = _choice_for(lead, pending)
@@ -701,6 +874,14 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
             f"output_tokens={cinfo['output_tokens']} non_text_blocks={cinfo['non_text_blocks']} "
             f"retried={cinfo['retried']}", detail=True)
         say(f"classify raw text: {cinfo['raw_text']!r}", detail=True)
+
+    if result.get("existing_client") and not lead.is_existing_client and not dry_run:
+        lead.is_existing_client = True
+        lead.next_followup_at = None
+        db.session.commit()
+        log.info("existing client lead=%s detected by the classifier", lead_id)
+        if not human_handled(lead):
+            return _existing_client_reply(lead, dry_run, "said they already use Mega-Net")
 
     latest = " ".join(m.body for m in pending)
     hint = ai.heuristic_intent(latest)

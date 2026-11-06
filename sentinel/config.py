@@ -16,6 +16,12 @@ def _flag(name, default=False):
     return default if value is None else value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _numbers(name):
+    """Comma separated phone numbers -> tuple of digit-only strings."""
+    out = ("".join(c for c in part if c.isdigit()) for part in (_env(name) or "").split(","))
+    return tuple(n for n in out if n)
+
+
 def database_uri():
     url = _env("DATABASE_URL")
     if not url:
@@ -72,6 +78,10 @@ def load_config():
         # Who handles a lead: the bot keeps answering ready leads unless a human has taken over
         "OWNER_TAKEOVER_HOURS": float(_env("OWNER_TAKEOVER_HOURS", "48")),
         "BOT_ANSWERS_AFTER_READY": _flag("BOT_ANSWERS_AFTER_READY", True),
+        # Existing clients get the support route, not sales flows. Digits only, comma separated.
+        "EXISTING_CLIENT_NUMBERS": _numbers("EXISTING_CLIENT_NUMBERS"),
+        # Team members who are alerted about demo requests and may send confirm / decline (digits, comma separated)
+        "STAFF_WHATSAPP_NUMBERS": _numbers("STAFF_WHATSAPP_NUMBERS"),
         # Optional email copy of every owner alert (all six must be set, else email is off)
         "SMTP_HOST": _env("SMTP_HOST"),
         "SMTP_PORT": int(_env("SMTP_PORT", "587")),

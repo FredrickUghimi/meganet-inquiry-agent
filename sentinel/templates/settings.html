@@ -3,6 +3,8 @@
 {% block body %}
 <div class="card">
   <h2 style="margin-top:0">Business facts</h2>
+  {% if todo %}<div class="banner" role="alert"><b>Still TODO ({{ todo|length }}):</b> {{ todo|join(', ') }}</div>
+  {% else %}<p class="mute">Nothing is TODO: every business fact is filled in.</p>{% endif %}
   <p class="mute">Edit these in <code>sentinel/business_facts.py</code>. A fact marked TODO is unknown: the bot says the team will confirm it.</p>
   <div class="table-scroll"><table>
     {% for label, value, todo in facts %}

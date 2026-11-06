@@ -24,6 +24,8 @@ except `DASHBOARD_PASSWORD`.
 | `BOT_ANSWERS_AFTER_READY` | `1`: the bot keeps answering ready leads unless a person has taken over. `0`: old behaviour, ready means silent | Preset | `1` |
 | `HOLD_REPLY_COOLDOWN_HOURS` | Hours between automatic "Fredrick has your message" replies to a lead who is ready, paused or marked contacted | Preset | `4` |
 | `OWNER_REPLY_REMINDER_MINUTES` | Minutes before you are reminded about a waiting lead you have not answered (then every 3 hours, max 3) | Preset | `60` |
+| `EXISTING_CLIENT_NUMBERS` | Optional. Comma separated phone numbers (digits, with country code) of existing clients. They get the support route, not sales | Your client list | Blank |
+| `STAFF_WHATSAPP_NUMBERS` | Optional. Comma separated team numbers: alerted about demo requests, may send `confirm` / `decline` | Your team | Blank |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM` | Optional: email a copy of every alert to you. All six must be set, otherwise email is off (silently). Port 587 uses STARTTLS, 465 uses SSL. Gmail needs an app password | Your email provider | Blank |
 | `OWNER_AS_LEAD` | Testing only. Messages from `OWNER_WHATSAPP_NUMBER` are ignored by design (logged as "ignored (sender is OWNER_WHATSAPP_NUMBER...)"). Set to `1` to test the bot from your own phone; set back to `0` afterwards | You | `0` (preset) |
 | `DISPLAY_TZ` | Timezone for dates (preset `Africa/Lagos`) | Preset | Already set |
@@ -102,21 +104,38 @@ shows them. `PRICING_POLICY` is the one approved pricing sentence.
 answers safely (the team will confirm), the question is saved on the lead page under Open questions, and you get one alert
 (throttled to one per 10 minutes per lead).
 
-**Demos.** When a lead names a day and time ("Tuesday 10am", "next Tuesday at 2pm"), the bot checks it against business
-hours, minimum notice (2 hours while `DEMO_NOTICE_HOURS` is TODO) and confirmed demos. A valid slot becomes a *tentative*
-demo, the bot says it is pencilled in and not confirmed, and you get an alert. An invalid slot gets the next two or three
-open times. A vague request ("next week", "tomorrow afternoon") gets one short question. Demo times are stored in
-Africa/Lagos time.
+**Demos.** Live demos run only on **Wednesdays at 10:00 AM WAT**, 30 minutes, with at least 2 hours' notice, and
+`DEMO_SLOTS_PER_SESSION` (default 1) demos per Wednesday (change the constants in `sentinel/business_facts.py`). The flow:
 
-Commands you can send from the owner number:
+1. A prospect asks for a demo: the bot sends the demo video for their product (both if the product is unknown) with a
+   one-line description taken from the product notes, then asks whether they also want a personalised demo with the team.
+   The same video is not sent to the same lead twice within 24 hours. A prospect who prefers to speak to the team skips
+   the video.
+2. If yes, it collects name, organisation, phone and channel (WhatsApp video call or Google Meet), asking only for what is
+   still missing.
+3. It states that personalised demos are on Wednesdays at 10:00 AM WAT and pencils in the next free Wednesday, or the one
+   the prospect named. A request for any other day or time is **not** pencilled in: the bot explains the demo day and offers
+   the next two Wednesdays with a free slot (a full Wednesday is skipped).
+4. A *tentative* demo is created with the collected fields (the columns are added automatically at start-up). Fredrick and
+   the numbers in `STAFF_WHATSAPP_NUMBERS` get an alert with `confirm <id>` and `decline <id> [new time]`.
+5. The bot never says a demo is confirmed. Only `confirm <id>` does that (it then tells the prospect).
 
-- `confirm <demo id>`: confirms the demo and tells the lead. Refused if it clashes with another confirmed demo.
-- `decline <demo id>`: declines it and offers the lead other open times.
-- `decline <demo id> <new time>` (e.g. `decline 3 Wednesday 2pm`): marks it rescheduled, proposes the new time to the lead,
-  and creates a new tentative demo. Send `confirm <new id>` once they agree.
+Commands from the owner number, and from staff numbers (staff may send only `confirm`, `decline` and `help`):
 
-The bot never says a demo is confirmed until its status is confirmed. Confirm and decline do not hand the lead over; the
-bot keeps answering. The columns and tables are created automatically on start-up.
+- `confirm <demo id>`: confirms the demo and tells the lead. Refused if the Wednesday is already full.
+- `decline <demo id>`: declines it and offers the next two Wednesdays.
+- `decline <demo id> <new time>` (e.g. `decline 3 next Wednesday`): proposes the new time (it must be a free Wednesday at
+  10:00) and creates a new tentative demo. Send `confirm <new id>` once they agree.
+
+Demos are listed on the dashboard **Demos** page and on each lead page. Times are Africa/Lagos. Outside business hours
+(Monday to Friday, 9:00 AM to 5:00 PM WAT) the bot still answers and says when the team will reply.
+
+**Existing clients.** If a lead says they already use a Mega-Net product, is listed in `EXISTING_CLIENT_NUMBERS`
+(comma separated, digits only), or you tick **Existing client** on the lead page, the bot sends the support route and
+support hours instead of any sales flow or menu, stops follow-ups, and alerts you once. It is logged as
+`existing client lead=...`.
+
+**Settings page.** Shows every business fact and a red list of the constants still `TODO`. No secrets are shown.
 
 ## 5. Render plans
 

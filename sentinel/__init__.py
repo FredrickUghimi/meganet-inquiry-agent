@@ -44,6 +44,12 @@ NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters ex
     ("leads", "needs_owner", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("messages", "choice_id", "VARCHAR(32)"),
     ("leads", "handback_at", "TIMESTAMP"),
+    ("leads", "demo_state", "VARCHAR(12)"),
+    ("leads", "is_existing_client", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("leads", "existing_alerted_at", "TIMESTAMP"),
+    ("demo_requests", "contact_name", "VARCHAR(120)"),
+    ("demo_requests", "organisation", "VARCHAR(160)"),
+    ("demo_requests", "contact_phone", "VARCHAR(40)"),
 )
 
 

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Demos{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 style="margin-top:0">Demos</h2>
+  <p class="mute">Reply <code>confirm &lt;id&gt;</code> or <code>decline &lt;id&gt; [new time]</code> on WhatsApp. Nothing is confirmed until you do.</p>
+  <div class="table-scroll"><table>
+    <tr><th>ID</th><th>When (WAT)</th><th>Status</th><th>Lead</th><th>Name</th><th>Organisation</th><th>Phone</th><th>Channel</th></tr>
+    {% for d in demos %}
+    <tr><td>{{ d.id }}</td>
+      <td>{{ d.start_at.strftime('%a %d %b %H:%M') if d.start_at else '-' }}</td>
+      <td><span class="badge">{{ d.status }}</span>{% if d.confirmed_by %} <span class="mute">by {{ d.confirmed_by }}</span>{% endif %}</td>
+      <td><a href="{{ url_for('dashboard.lead_detail', lead_id=d.lead_id) }}">{{ d.lead.display_name }}</a></td>
+      <td>{{ d.contact_name or '-' }}</td><td>{{ d.organisation or '-' }}</td><td>{{ d.contact_phone or '-' }}</td><td>{{ d.channel or '-' }}</td></tr>
+    {% else %}<tr><td colspan="8" class="mute">No demo requests yet.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}

@@ -1,5 +1,6 @@
-"""Demo scheduling: defensive parsing of "Tuesday 10am", validation against business hours, notice and confirmed
-demos, and alternative slots. Times here are naive local clock times in the business time zone (Africa/Lagos)."""
+"""Demo scheduling. Live demos run on one weekday at one time (business_facts.DEMO_WEEKDAY / DEMO_START_TIME, WAT).
+Defensive parsing of "Wednesday", "12 Nov", "tomorrow 10am"; validation against the demo day, notice and capacity;
+the next free demo days. Times here are naive local clock times in the business time zone (Africa/Lagos)."""
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -7,17 +8,28 @@ from zoneinfo import ZoneInfo
 from . import business_facts as bf
 from .models import DemoRequest
 
-DEFAULT_DURATION = 30  # minutes, while DEMO_DURATION_MINUTES is still TODO
-DEFAULT_NOTICE_HOURS = 2  # while DEMO_NOTICE_HOURS is still TODO
-ASK_TIME = "Which day and time would suit you for the demo? For example Tuesday at 10am."
+DEFAULT_DURATION = 30  # minutes, if DEMO_DURATION_MINUTES has no number
+DEFAULT_NOTICE_HOURS = 2  # if DEMO_NOTICE_HOURS has no number
+HOLDING = ("tentative", "confirmed")  # statuses that use up a slot
 
 _WEEKDAYS = {"monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1, "wednesday": 2, "wed": 2, "weds": 2,
              "thursday": 3, "thu": 3, "thur": 3, "thurs": 3, "friday": 4, "fri": 4, "saturday": 5, "sat": 5,
              "sunday": 6, "sun": 6}
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov",
+                                        "dec"], 1)}
 _DAY_RE = re.compile(r"\b(?:(next)\s+)?(%s)\b" % "|".join(sorted(_WEEKDAYS, key=len, reverse=True)), re.I)
+_DATE_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b", re.I)
 _TIME_RE = re.compile(r"(?:\bat\s+|\b)(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?![a-z])"
                       r"|\b([01]?\d|2[0-3]):([0-5]\d)\b|\bat\s+(\d{1,2})\b(?![:\d]|\s*(?:am|pm|staff|people|users|patients))"
                       r"|\b(noon|midday)\b", re.I)
+_PREFERS_TEAM = re.compile(
+    r"\b(speak|talk|chat|call|meet)\b[^.?!]{0,40}\b(team|someone|somebody|person|human|fredrick|representative|"
+    r"member|staff|sales)\b|\b(prefer|rather|instead)\b[^.?!]{0,40}\b(speak|talk|call|person|team)\b|"
+    r"\b(without|skip|no need for|don'?t need)\b[^.?!]{0,20}\bvideo\b", re.I)
+_YES = re.compile(r"^\W*(yes|yeah|yep|yup|sure|ok|okay|definitely|absolutely|of course|i would|i'd like|"
+                  r"why not|go ahead|interested|sounds good)\b", re.I)
+_NO = re.compile(r"^\W*(no|nope|nah|not now|not really|no thanks|no thank you|maybe later|later)\b", re.I)
+_PHONE = re.compile(r"(?<![\w])(\+?\d[\d\s\-]{8,16}\d)(?![\w])")
 
 
 def tz():
@@ -36,17 +48,74 @@ def notice_hours():
     return bf.number("DEMO_NOTICE_HOURS", DEFAULT_NOTICE_HOURS)
 
 
+def slots_per_session():
+    try:
+        return max(1, int(bf.DEMO_SLOTS_PER_SESSION))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _hm(s):
     h, m = s.split(":")
     return int(h), int(m)
 
 
+def clock(h, m=0):
+    return f"{(h % 12) or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
+
+
 def fmt(dt):
-    return f"{dt:%A} {dt.day} {dt:%B} at {dt:%H:%M} (Lagos time)"
+    """'Wednesday 12 November at 10:00 AM WAT'"""
+    return f"{dt:%A} {dt.day} {dt:%B} at {clock(dt.hour, dt.minute)} WAT"
+
+
+def rule_text():
+    h, m = bf.demo_hm()
+    return f"{bf.WEEKDAY_NAMES[bf.demo_weekday()]}s at {clock(h, m)} WAT"
+
+
+def hours_status(now_utc):
+    """One prompt line: the time and whether the team is in business hours, so replies say when the team will answer."""
+    now = now_local(now_utc)
+    if in_business_hours(now):
+        return f"Now: {now:%A %H:%M} WAT, inside business hours ({bf.display('BUSINESS_HOURS')})."
+    return (f"Now: {now:%A %H:%M} WAT, OUTSIDE business hours ({bf.display('BUSINESS_HOURS')}). When you say the team "
+            f"will reply or confirm, say they will do so from {fmt_open(next_opening(now))}.")
+
+
+def in_business_hours(now):
+    h = bf.BUSINESS_HOURS
+    (sh, sm), (eh, em) = _hm(h["start"]), _hm(h["end"])
+    return now.weekday() in h["days"] and (sh, sm) <= (now.hour, now.minute) < (eh, em)
+
+
+def next_opening(now):
+    h = bf.BUSINESS_HOURS
+    sh, sm = _hm(h["start"])
+    day = now.date()
+    for _ in range(8):
+        cand = datetime(day.year, day.month, day.day, sh, sm)
+        if cand.weekday() in h["days"] and cand > now:
+            return cand
+        day += timedelta(days=1)
+    return now
+
+
+def fmt_open(dt):
+    return f"{dt:%A} at {clock(dt.hour, dt.minute)} WAT"
+
+
+def team_note(now_utc):
+    """Sentence appended to fixed replies outside business hours, else ''."""
+    now = now_local(now_utc)
+    if in_business_hours(now):
+        return ""
+    h = bf.BUSINESS_HOURS
+    return (f" Our team is outside working hours now ({bf.display('BUSINESS_HOURS')}) and will reply from "
+            f"{fmt_open(next_opening(now))}.")
 
 
 def _time_of(text):
-    """(hour, minute) from the first clear time in the text, else None."""
     m = _TIME_RE.search(text)
     if not m:
         return None
@@ -66,17 +135,27 @@ def _time_of(text):
 
 
 def parse(text, now_utc):
-    """Returns {"kind": "none"} when the text names no day or time, {"kind": "vague", "ask": ...} when it is too
-    unclear to book, or {"kind": "slot", "start": datetime}. Never raises."""
+    """{"kind": "none"} when the text names no day or time; {"kind": "vague"} when it is too unclear to pencil in;
+    {"kind": "slot", "start": datetime}. A demo weekday with no time means DEMO_START_TIME. Never raises."""
     try:
-        text = (text or "")[:500]
-        low = text.lower()
+        low = (text or "")[:500].lower()
         now = now_local(now_utc)
         day, tm = None, _time_of(low)
+        dm = _DATE_RE.search(low)
         if re.search(r"\btoday\b", low):
             day = now.date()
         elif re.search(r"\btomorrow\b", low):
             day = now.date() + timedelta(days=1)
+        elif dm:
+            d, mo = int(dm.group(1)), _MONTHS[dm.group(2)[:3].lower()]
+            for year in (now.year, now.year + 1):
+                try:
+                    cand = datetime(year, mo, d).date()
+                except ValueError:
+                    break
+                if cand >= now.date():
+                    day = cand
+                    break
         else:
             m = _DAY_RE.search(low)
             if m:
@@ -87,54 +166,99 @@ def parse(text, now_utc):
                 day = now.date() + timedelta(days=ahead)
                 if m.group(1) and day.isocalendar()[:2] == now.date().isocalendar()[:2]:
                     day += timedelta(days=7)
-        vague_words = re.search(r"\b(next week|this week|later|morning|afternoon|evening|sometime|any ?time)\b", low)
+        vague = re.search(r"\b(next week|this week|later|morning|afternoon|evening|sometime|any ?time|soon)\b", low)
         if day is None and tm is None:
-            return {"kind": "vague", "ask": ASK_TIME} if vague_words else {"kind": "none"}
-        if day is None or tm is None:
-            return {"kind": "vague", "ask": ASK_TIME}
+            return {"kind": "vague"} if vague else {"kind": "none"}
+        if day is None:
+            return {"kind": "vague"}
+        if tm is None:
+            if day.weekday() == bf.demo_weekday():
+                tm = bf.demo_hm()
+            else:
+                return {"kind": "vague"}
         return {"kind": "slot", "start": datetime(day.year, day.month, day.day, tm[0], tm[1])}
     except Exception:
-        return {"kind": "vague", "ask": ASK_TIME}
+        return {"kind": "vague"}
 
 
-def _overlaps(start, minutes, exclude_id=None):
-    end = start + timedelta(minutes=minutes)
-    for d in DemoRequest.query.filter_by(status="confirmed").all():
-        if d.id != exclude_id and d.start_at and d.start_at < end and start < d.start_at + timedelta(minutes=d.duration):
-            return True
-    return False
+def used(day, exclude_lead_id=None, exclude_id=None):
+    """Demos already holding a slot on this date (tentative or confirmed, other leads' or other requests')."""
+    n = 0
+    for d in DemoRequest.query.filter(DemoRequest.status.in_(HOLDING)).all():
+        if d.start_at and d.start_at.date() == day and d.id != exclude_id and d.lead_id != exclude_lead_id:
+            n += 1
+    return n
 
 
-def validate(start, now_utc, exclude_id=None):
-    """(ok, reason) for a demo start (naive Lagos time)."""
-    h = bf.BUSINESS_HOURS
-    mins = duration()
-    (sh, sm), (eh, em) = _hm(h["start"]), _hm(h["end"])
-    day_start = start.replace(hour=sh, minute=sm)
-    day_end = start.replace(hour=eh, minute=em)
-    if start.weekday() not in h["days"] or start < day_start or start + timedelta(minutes=mins) > day_end:
-        return False, "outside demo hours"
+def validate(start, now_utc, exclude_id=None, lead_id=None):
+    """(ok, reason). Only the demo weekday at the demo start time, with notice, and a free slot, is valid."""
+    if start.weekday() != bf.demo_weekday() or (start.hour, start.minute) != bf.demo_hm():
+        return False, "not a demo day or time"
     if start < now_local(now_utc) + timedelta(hours=notice_hours()):
         return False, "too soon"
-    if _overlaps(start, mins, exclude_id):
-        return False, "already taken"
+    if used(start.date(), exclude_lead_id=lead_id, exclude_id=exclude_id) >= slots_per_session():
+        return False, "full"
     return True, ""
 
 
-def next_slots(now_utc, count=3):
-    """The next valid slots, one or two per day at fixed times, earliest first."""
+def next_slots(now_utc, count=2, lead_id=None):
+    """The next demo days with a free slot, earliest first (a full day is skipped)."""
     out, day = [], now_local(now_utc).date()
-    for _ in range(21):
-        for hour in (10, 14):
-            start = datetime(day.year, day.month, day.day, hour, 0)
-            if validate(start, now_utc)[0]:
-                out.append(start)
+    h, m = bf.demo_hm()
+    for _ in range(26 * 7):
+        start = datetime(day.year, day.month, day.day, h, m)
+        if validate(start, now_utc, lead_id=lead_id)[0]:
+            out.append(start)
+            if len(out) >= count:
+                break
         day += timedelta(days=1)
-        if len(out) >= count:
-            break
-    return out[:count]
+    return out
 
 
 def join_slots(slots):
-    parts = [f"{s:%A} {s.day} {s:%B} at {s:%H:%M}" for s in slots]
+    parts = [fmt(s) for s in slots]
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " or " + parts[-1]
+
+
+def redirect_text(now_utc, lead_id=None, asked=None):
+    """Explain the demo day and offer the next two free ones (used when a request does not fit the rules)."""
+    slots = next_slots(now_utc, 2, lead_id)
+    what = f"{fmt(asked).rsplit(' at ', 1)[0]} is not a demo day. " if asked else ""
+    offer = (f"The next available are {join_slots(slots)}. Which would you prefer?" if slots
+             else "I will ask the team for the next available date.")
+    return f"{what}Live demos are held on {rule_text()}. {offer}"
+
+
+# --- reading the lead's messages ---------------------------------------------------------------
+
+def prefers_team(text):
+    return bool(_PREFERS_TEAM.search(text or ""))
+
+
+def yes_no(text):
+    """'yes', 'no' or None for a short answer to 'would you like a personalised demo?'."""
+    t = (text or "").strip()
+    if len(t.split()) > 12:
+        return "yes" if (parse(t, datetime.utcnow())["kind"] == "slot" or prefers_team(t)) else None
+    if _NO.match(t):
+        return "no"
+    return "yes" if _YES.match(t) else None
+
+
+def phone_in(text):
+    m = _PHONE.search(text or "")
+    return re.sub(r"[\s\-]", "", m.group(1)) if m else None
+
+
+def channel_in(text):
+    low = (text or "").lower()
+    if "meet" in low and "google" in low or "g-meet" in low or "gmeet" in low:
+        return "Google Meet"
+    if "google meet" in low:
+        return "Google Meet"
+    if "whatsapp" in low or "video call" in low:
+        return "WhatsApp video call"
+    return None
+
+
+CHANNEL_NAMES = {"whatsapp": "WhatsApp video call", "meet": "Google Meet"}

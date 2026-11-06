@@ -113,6 +113,16 @@ def receive():
                         _log_event("message", phone, phone_id,
                                    f"owner command {_body_of(m).split()[0].lower().rstrip(':')}")
                         run_async(current_app._get_current_object(), service.run_owner_command, _body_of(m))
+                    elif (phone in cfg["STAFF_WHATSAPP_NUMBERS"] and m.get("type") == "text"
+                          and service.is_owner_command(_body_of(m))
+                          and _body_of(m).split()[0].lower().rstrip(":") in service.STAFF_COMMANDS):
+                        _log_event("message", phone, phone_id,
+                                   f"staff command {_body_of(m).split()[0].lower().rstrip(':')}")
+                        run_async(current_app._get_current_object(), service.run_owner_command, _body_of(m), phone,
+                                  "staff")
+                    elif phone in cfg["STAFF_WHATSAPP_NUMBERS"]:
+                        _log_event("message", phone, phone_id, "ignored (sender is a staff number; only confirm, "
+                                                               "decline and help are accepted)")
                     elif phone == owner and not cfg.get("OWNER_AS_LEAD"):
                         _log_event("message", phone, phone_id,
                                    "ignored (sender is OWNER_WHATSAPP_NUMBER; set OWNER_AS_LEAD=1 to test)")

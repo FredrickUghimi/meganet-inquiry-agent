@@ -45,6 +45,16 @@ services:
         value: "4"
       - key: OWNER_REPLY_REMINDER_MINUTES
         value: "60"
+      # Who handles a lead: the bot answers ready leads unless a person took over in the last N hours
+      - key: OWNER_TAKEOVER_HOURS
+        value: "48"
+      - key: BOT_ANSWERS_AFTER_READY
+        value: "1"
+      # Comma separated numbers (digits only): existing clients get the support route; staff get demo alerts
+      - key: EXISTING_CLIENT_NUMBERS
+        sync: false
+      - key: STAFF_WHATSAPP_NUMBERS
+        sync: false
       # Optional email copy of owner alerts: set ALL six or none (blank = email off)
       - key: SMTP_HOST
         sync: false

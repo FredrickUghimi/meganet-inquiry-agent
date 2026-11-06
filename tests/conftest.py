@@ -25,6 +25,8 @@ def claude(monkeypatch):
     state = {"intent": "exploring", "product": "ehr_cloud", "name": None, "summary": "Clinic, 12 staff."}
     monkeypatch.setattr(ai, "classify", lambda lead, msgs: dict(state))
     monkeypatch.setattr(ai, "draft_reply", lambda lead, msgs, situation: f"reply:{situation}")
+    state["demo"] = {}  # what the lead has told us for a personalised demo: name / organisation / phone / channel
+    monkeypatch.setattr(ai, "extract_demo_details", lambda lead, msgs: dict(state["demo"]))
     monkeypatch.setattr(ai, "draft_followup_line", lambda lead, msgs, stage, prev: f"line{stage}")
     return state
 

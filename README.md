@@ -12,13 +12,20 @@ One Flask app, one database, one in-process scheduler, one Render web service. N
 4. **Escalation.** The first time a lead turns "ready", Fredrick gets a WhatsApp message: one-line summary plus a link to the lead. Nothing is auto-booked.
 5. **Follow-ups.** If a lead goes quiet, they get a WhatsApp message 1, 3 and 7 days after **their last message**. Any reply cancels the sequence and restarts the clock. After the Day 7 message the lead is marked **cold** and is never messaged automatically again. A reply from a cold lead revives them.
 
+### Demos, existing clients and business facts
+
+- **Business facts** live in `sentinel/business_facts.py` (demo day and time, channels, notice, promises, support hours, pricing sentence, implementation, migration, training, what is not offered, the product demo videos). Sentences addressed to the bot itself are **internal rules**: they go in a separate section of the system prompt that the model must never quote or reveal. Anything still `TODO` is unknown to the bot (it says the team will confirm) and is listed in a startup WARNING and on the dashboard **Settings** page.
+- **Demo workflow.** When a prospect asks for a demo the bot sends the demo video for their product (both if the product is unknown) with a one-line description from the product notes, then asks whether they want a personalised demo with the team. If yes it collects name, organisation, phone and channel (WhatsApp video call or Google Meet), asking only for what is missing, and pencils in the next free **Wednesday at 10:00 AM WAT** (30 minutes, 2 hours' notice, `DEMO_SLOTS_PER_SESSION` per Wednesday). Any other day or time is not pencilled in: the bot explains the demo day and offers the next two free Wednesdays. A prospect who prefers to speak to the team skips the video. The same video is never sent to the same lead twice within 24 hours. The result is a *tentative* demo on the **Demos** page and the lead page; Fredrick and the numbers in `STAFF_WHATSAPP_NUMBERS` get an alert. **Nothing is confirmed until someone sends `confirm <id>`**; `decline <id> [new time]` declines or reschedules.
+- **Existing clients** (they say they already use Mega-Net, are listed in `EXISTING_CLIENT_NUMBERS`, or you tick **Existing client** on the lead page) get the support route and support hours, no sales flows or menus, no follow-ups, and Fredrick is alerted once.
+- **Who answers.** A lead is human-handled if paused, marked contacted, or an owner or staff message was stored in the last `OWNER_TAKEOVER_HOURS` (48). Otherwise the bot keeps answering, even after a lead is ready (`BOT_ANSWERS_AFTER_READY`).
+
 ### Lead statuses
 
 | Status | Meaning | Follow-ups run? |
 |---|---|---|
 | `new` | Just arrived, hasn't replied to our first message | yes |
 | `engaged` | Conversation under way | yes |
-| `ready` | Wants demo/pricing. Fredrick alerted | no (Fredrick's turn) |
+| `ready` | Wants demo/pricing. Fredrick alerted. The bot still answers unless a person has taken over | no |
 | `cold` | Silent through Day 7 | no |
 | `closed_won` / `closed_lost` | Set by Fredrick, or `closed_lost` when Claude judges "not a fit" | no |
 
@@ -170,7 +177,7 @@ Both are **on by default** and submitted by `--all` above (or by hand from `sent
 
 ## Configuration reference
 
-Every setting is an environment variable. `.env.example` lists them all with comments. Required in production: `DASHBOARD_PASSWORD`, `SECRET_KEY`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `OWNER_WHATSAPP_NUMBER`. Webhook calls without a valid signature are rejected.
+Every setting is an environment variable. `.env.example` lists them all with comments. Required in production: `DASHBOARD_PASSWORD`, `SECRET_KEY`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `OWNER_WHATSAPP_NUMBER`. Webhook calls without a valid signature are rejected. Optional: `OWNER_TAKEOVER_HOURS`, `BOT_ANSWERS_AFTER_READY`, `EXISTING_CLIENT_NUMBERS`, `STAFF_WHATSAPP_NUMBERS`.
 
 ## Project layout
 

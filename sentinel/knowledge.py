@@ -11,7 +11,8 @@ Mega-Net EHR Cloud: cloud electronic health records for clinics and hospitals.
 Mega-Net ERP Cloud: cloud ERP for businesses (operations, finance, inventory).
 
 Pricing: not quoted by the assistant. Fredrick shares pricing personally after learning about the customer's needs. Never explain how pricing is determined.
-Demos: Fredrick runs them personally.
+Demos: a product demonstration video, and personalised live demonstrations with the Mega-Net team (days, hours and
+channels are in the business facts). Every booking is subject to confirmation by the team.
 """
 
 VOICE = """\
@@ -53,8 +54,8 @@ Modules that exist in the product:
 - Inpatient nursing: medication administration chart, handover reports.
 - Surgery: theatre board, surgical team, informed-consent record.
 - Antenatal: registrations, visits, delivery outcome.
-- Communication: staff messaging between staff across facilities, announcements to facilities or roles, patient SMS
-  (campaigns and ad-hoc messages with a credit ledger).
+- Communication: staff messaging between staff across facilities, announcements to facilities or roles. Patient SMS
+  does not send real messages (see the sections below), and appointment reminders are currently unavailable.
 - Document management: document registry with categories and a confidential flag.
 - Business insights: Visits, Revenue, Lab, Pharmacy and Inventory dashboards, a multi-facility comparison, and data export.
 - Financial Sentinel: rule-based detection of revenue-integrity problems (unbilled service, duplicate transaction,
@@ -62,7 +63,8 @@ Modules that exist in the product:
   explanation for a human to review. It detects and explains only; it takes no action by itself.
 - Staff management and security: facilities and staff memberships, role-based permissions, row-level data isolation per
   organization, audit logging, authenticator-app MFA.
-- Support: in-app support tickets to Mega-Net and a help center.
+- Support: in-app support tickets to Mega-Net and a help center. There is no 24/7 live technical support; support hours
+  are in the business facts.
 
 System roles (nine, all system-defined):
 1. Super Admin (Mega-Net platform level, not a client role)
@@ -82,7 +84,8 @@ Nurse and Front Desk/Registration can enroll but are not required to. Mega-Net p
 Do not repeat the older docs that list only three mandatory roles.
 
 Built, but may need switching on or setting up per client (do not promise they are live for a given client):
-- Appointment reminder SMS: off by default for every organization; Mega-Net turns it on per organization, with a monthly cap.
+- Appointment reminders (including SMS reminders): currently unavailable in EHR Cloud. Never offer or promise them, and do
+  not say they can be switched on; say the team will confirm if asked when this may change.
 - Patient SMS: runs in simulated mode (no real text leaves the system) until a real SMS gateway is connected for the client.
 - Radiology critical-finding SMS escalation: built but currently inactive. The in-app critical-finding alert is what works today.
 - Financial Sentinel AI explanations: need the AI service configured; without it findings show plain template wording.

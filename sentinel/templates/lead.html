@@ -24,6 +24,7 @@
         <input type="hidden" name="action" value="{{ value }}"><button>{{ label }}</button>
       </form>
     {% endmacro %}
+    {{ act('existing_client', 'Existing client: ' ~ ('yes (tap to clear)' if lead.is_existing_client else 'no (tap to set)')) }}
     {{ act('contacted', 'Mark contacted') }}
     {{ act('closed_won', 'Closed won') }}
     {{ act('closed_lost', 'Closed lost') }}
@@ -39,7 +40,8 @@
   {% if demos %}<h3 style="margin-top:0">Demos</h3>
   {% for d in demos %}<div>#{{ d.id }} {{ d.start_at.strftime('%a %d %b %H:%M') if d.start_at }} (Lagos) ·
     <span class="badge">{{ d.status }}</span>{% if d.confirmed_by %} · by {{ d.confirmed_by }}{% endif %}
-    <span class="mute">· asked: {{ d.requested_text }}</span></div>{% endfor %}{% endif %}
+    <span class="mute">· asked: {{ d.requested_text }}</span>
+    {% if d.contact_name or d.organisation or d.contact_phone or d.channel %}<div class="mute">Name: {{ d.contact_name or '-' }} · Organisation: {{ d.organisation or '-' }} · Phone: {{ d.contact_phone or '-' }} · Channel: {{ d.channel or '-' }}</div>{% endif %}</div>{% endfor %}{% endif %}
   {% if questions %}<h3>Open questions</h3>
   {% for q in questions %}<div>{{ q.kind.replace('_', ' ') }}: {{ q.question }} <span class="mute">· {{ q.created_at|local }}</span></div>{% endfor %}{% endif %}
 </div>
