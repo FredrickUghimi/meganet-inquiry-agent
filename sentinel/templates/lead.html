@@ -24,6 +24,7 @@
         <input type="hidden" name="action" value="{{ value }}"><button>{{ label }}</button>
       </form>
     {% endmacro %}
+    {% if lead.is_existing_client %}<span class="badge" style="align-self:center">{{ 'Existing client, upgrade enquiry' if lead.upgrade_enquiry else 'Existing client' }}</span>{% endif %}
     {{ act('existing_client', 'Existing client: ' ~ ('yes (tap to clear)' if lead.is_existing_client else 'no (tap to set)')) }}
     {{ act('contacted', 'Mark contacted') }}
     {{ act('closed_won', 'Closed won') }}

@@ -73,11 +73,11 @@ def test_internal_rules_are_in_a_separate_never_reveal_section(app):
 
 def test_not_offered_agrees_with_knowledge(app):
     from sentinel.knowledge import EHR_CLOUD_KNOWLEDGE, ERP_CLOUD_KNOWLEDGE, PRODUCT_NOTES
-    assert "Automated appointment reminders in Mega-Net EHR Cloud (currently unavailable)" in business_facts.NOT_OFFERED
+    assert "Patient SMS and automated appointment reminders in Mega-Net EHR Cloud (currently unavailable)" in business_facts.NOT_OFFERED
     assert "turns it on per organization" not in EHR_CLOUD_KNOWLEDGE and "currently unavailable" in EHR_CLOUD_KNOWLEDGE
     assert "24/7 live technical support" in business_facts.NOT_OFFERED and "no 24/7 live technical support" in EHR_CLOUD_KNOWLEDGE
     assert "24/7" not in PRODUCT_NOTES and "24/7" not in ERP_CLOUD_KNOWLEDGE
-    assert "reminder" not in ERP_CLOUD_KNOWLEDGE.lower() and "reminders (including SMS reminders): currently unavailable" in EHR_CLOUD_KNOWLEDGE
+    assert "reminder" not in ERP_CLOUD_KNOWLEDGE.lower()
 
 
 # --- validation: Wednesdays only -----------------------------------------------------------------

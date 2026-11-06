@@ -10,7 +10,7 @@ from .models import DemoRequest
 
 DEFAULT_DURATION = 30  # minutes, if DEMO_DURATION_MINUTES has no number
 DEFAULT_NOTICE_HOURS = 2  # if DEMO_NOTICE_HOURS has no number
-HOLDING = ("tentative", "confirmed")  # statuses that use up a slot
+HOLDING = ("confirmed",)  # only CONFIRMED demos use up a slot; tentative requests never block anyone
 
 _WEEKDAYS = {"monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1, "wednesday": 2, "wed": 2, "weds": 2,
              "thursday": 3, "thu": 3, "thur": 3, "thurs": 3, "friday": 4, "fri": 4, "saturday": 5, "sat": 5,
@@ -182,7 +182,7 @@ def parse(text, now_utc):
 
 
 def used(day, exclude_lead_id=None, exclude_id=None):
-    """Demos already holding a slot on this date (tentative or confirmed, other leads' or other requests')."""
+    """Confirmed demos already holding a slot on this date (other requests only). Tentative ones never count."""
     n = 0
     for d in DemoRequest.query.filter(DemoRequest.status.in_(HOLDING)).all():
         if d.start_at and d.start_at.date() == day and d.id != exclude_id and d.lead_id != exclude_lead_id:

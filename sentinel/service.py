@@ -51,8 +51,10 @@ def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp")
 
 def next_followup_time(lead):
     """When the next stage is due, or None if the sequence should not run."""
-    if lead.status not in ACTIVE or lead.followup_paused or not lead.phone or lead.is_existing_client:
+    if lead.status not in ACTIVE or lead.followup_paused or not lead.phone:
         return None
+    if lead.is_existing_client and not lead.upgrade_enquiry:
+        return None  # existing clients get no automatic follow-ups unless they are a sales lead
     nxt = next((s for s in STAGES if s > lead.followup_stage), None)
     if nxt is None:
         return None
@@ -549,6 +551,33 @@ def support_reply_text(now=None):
             f"Support hours: {business_facts.SUPPORT_HOURS}" + demo.team_note(now or utcnow()))
 
 
+def _existing_client_message(lead, result, latest, dry_run, say):
+    """Each message from an existing client is support or sales. Support gets the support route and no sales flow
+    (returns the outcome). Sales is treated as a normal sales lead: the flag stays, the lead page shows 'Existing
+    client, upgrade enquiry', and Fredrick is alerted (returns None so the normal pipeline continues)."""
+    topic = result.get("client_topic")
+    if topic not in ("support", "sales"):
+        topic = ai.client_topic_hint(latest)
+    elif topic == "support" and ai.client_topic_hint(latest) == "sales":
+        topic = "sales"  # an upgrade / migration / pricing / demo word is never support
+    say(f"existing client: topic={topic}")
+    if topic == "sales":
+        log.info("existing client lead=%s sales enquiry (upgrade), normal sales flow", lead.id)
+        if not dry_run and not lead.upgrade_enquiry:
+            lead.upgrade_enquiry = True
+            lead.next_followup_at = next_followup_time(lead)
+            db.session.commit()
+            send_owner_alert(lead, f"{lead.display_name} is an existing client with an upgrade enquiry (sales).")
+        return None
+    if not dry_run and lead.upgrade_enquiry:
+        lead.upgrade_enquiry = False
+        lead.next_followup_at = None
+        db.session.commit()
+    if human_handled(lead):
+        return None  # a person is on this conversation: the waiting-prospect path applies
+    return _existing_client_reply(lead, dry_run, "support")
+
+
 def _existing_client_reply(lead, dry_run, why):
     """Existing clients get the support route, not sales flows or menus. Alerts Fredrick once; logs it."""
     log.info("existing client lead=%s (%s): support reply, no sales flow", lead.id, why)
@@ -655,15 +684,23 @@ def _demo_command(cmd, arg, rest, by="owner"):
             return f"Demo {req.id} is already confirmed."
         if req.status == "draft" or not req.start_at:
             return f"Demo {req.id} has no time yet, so it cannot be confirmed."
-        taken = sum(1 for d in DemoRequest.query.filter_by(status="confirmed").all()
-                    if d.id != req.id and d.start_at and d.start_at.date() == req.start_at.date())
+        local_now = demo.now_local(now)
+        if req.start_at <= local_now:
+            return (f"Cannot confirm demo {req.id}: its start time ({demo.fmt(req.start_at)}) has already passed. "
+                    f"Send: decline {req.id} [new time]")
+        taken = demo.used(req.start_at.date(), exclude_id=req.id)
         if taken >= demo.slots_per_session():
-            return f"Cannot confirm: demo {req.id} clashes with another confirmed demo. Decline it with a new time."
+            return (f"Cannot confirm demo {req.id}: {req.start_at:%A} {req.start_at.day} {req.start_at:%B} is already "
+                    f"full of confirmed demos ({taken} of {demo.slots_per_session()}). Nothing changed. "
+                    f"Send: decline {req.id} [new time]")
+        warn = ""
+        if req.start_at < local_now + timedelta(hours=demo.notice_hours()):
+            warn = (f" Warning: it starts in under {demo.notice_hours()} hours, so the prospect has had little notice.")
         req.status, req.confirmed_by = "confirmed", by
         db.session.commit()
         told = _tell_lead(lead, f"Good news: your demo is confirmed for {demo.fmt(req.start_at)}. We look forward to it.")
         return (f"Confirmed demo {req.id}: {lead.display_name}, {demo.fmt(req.start_at)}. "
-                + ("Lead told." if told else "Window closed: message them yourself."))
+                + ("Lead told." if told else "Window closed: message them yourself.") + warn)
     # decline [new time]
     parsed = demo.parse(rest, now) if rest.strip() else {"kind": "none"}
     if rest.strip() and parsed["kind"] != "slot":
@@ -826,8 +863,6 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         lead.next_followup_at = None
         db.session.commit()
         log.info("existing client lead=%s flagged by EXISTING_CLIENT_NUMBERS", lead_id)
-    if lead.is_existing_client and not human_handled(lead):
-        return _existing_client_reply(lead, dry_run, "flagged")
 
     if not dry_run and not retry:
         history = list(lead.messages)
@@ -875,15 +910,15 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
             f"retried={cinfo['retried']}", detail=True)
         say(f"classify raw text: {cinfo['raw_text']!r}", detail=True)
 
+    latest = " ".join(m.body for m in pending)
     if result.get("existing_client") and not lead.is_existing_client and not dry_run:
         lead.is_existing_client = True
-        lead.next_followup_at = None
         db.session.commit()
         log.info("existing client lead=%s detected by the classifier", lead_id)
-        if not human_handled(lead):
-            return _existing_client_reply(lead, dry_run, "said they already use Mega-Net")
-
-    latest = " ".join(m.body for m in pending)
+    if lead.is_existing_client:
+        outcome = _existing_client_message(lead, result, latest, dry_run, say)
+        if outcome:
+            return outcome
     hint = ai.heuristic_intent(latest)
     if hint and result["intent"] == "exploring":
         say(f"keyword safety net: latest message asks about {'pricing' if hint == 'ready_pricing' else 'a demo'}; "
@@ -987,7 +1022,7 @@ def _is_greeting(text):
 
 def menu_allowed(lead):
     """Never to ready, paused, contacted or closed leads, and not twice within the cooldown."""
-    if lead.status not in ACTIVE or lead.followup_paused or lead.needs_owner:
+    if lead.status not in ACTIVE or lead.followup_paused or lead.needs_owner or lead.is_existing_client:
         return False
     return not (lead.menu_sent_at and utcnow() - lead.menu_sent_at < menu.MENU_COOLDOWN)
 

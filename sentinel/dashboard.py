@@ -111,8 +111,15 @@ def leads():
 @bp.get("/demos")
 @login_required
 def demos():
+    from . import demo
     rows = DemoRequest.query.order_by(DemoRequest.id.desc()).all()
-    return render_template("demos.html", demos=rows)
+    days = {}
+    for d in rows:
+        if d.start_at and d.status in ("tentative", "confirmed"):
+            days.setdefault(d.start_at.date(), []).append(d)
+    groups = [(day, sorted(ds, key=lambda d: (d.status != "confirmed", d.id)),
+               sum(1 for d in ds if d.status == "confirmed")) for day, ds in sorted(days.items())]
+    return render_template("demos.html", demos=rows, groups=groups, capacity=demo.slots_per_session())
 
 
 @bp.get("/settings")

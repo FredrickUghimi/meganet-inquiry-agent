@@ -54,8 +54,7 @@ Modules that exist in the product:
 - Inpatient nursing: medication administration chart, handover reports.
 - Surgery: theatre board, surgical team, informed-consent record.
 - Antenatal: registrations, visits, delivery outcome.
-- Communication: staff messaging between staff across facilities, announcements to facilities or roles. Patient SMS
-  does not send real messages (see the sections below), and appointment reminders are currently unavailable.
+- Communication: staff messaging between staff across facilities, announcements to facilities or roles.
 - Document management: document registry with categories and a confidential flag.
 - Business insights: Visits, Revenue, Lab, Pharmacy and Inventory dashboards, a multi-facility comparison, and data export.
 - Financial Sentinel: rule-based detection of revenue-integrity problems (unbilled service, duplicate transaction,
@@ -84,10 +83,8 @@ Nurse and Front Desk/Registration can enroll but are not required to. Mega-Net p
 Do not repeat the older docs that list only three mandatory roles.
 
 Built, but may need switching on or setting up per client (do not promise they are live for a given client):
-- Appointment reminders (including SMS reminders): currently unavailable in EHR Cloud. Never offer or promise them, and do
-  not say they can be switched on; say the team will confirm if asked when this may change.
-- Patient SMS: runs in simulated mode (no real text leaves the system) until a real SMS gateway is connected for the client.
-- Radiology critical-finding SMS escalation: built but currently inactive. The in-app critical-finding alert is what works today.
+- Radiology critical-finding escalation beyond the in-app alert: built but currently inactive. The in-app critical-finding
+  alert is what works today.
 - Financial Sentinel AI explanations: need the AI service configured; without it findings show plain template wording.
   Detection itself works either way.
 - Radiology image upload from a device: needs file storage configured for the deployment; otherwise images are attached by link.
@@ -99,6 +96,7 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
 - Discount, waiver and refund recording, and therefore no Financial Sentinel monitoring of discounts or refunds.
 - Scheduled recurring reports: the data model exists but nothing runs it and there is no screen to set one up.
   There is no dedicated Radiology dashboard.
+- Patient SMS and automated appointment reminders are currently unavailable in Mega-Net EHR Cloud. Never offer or promise them.
 - Custom roles (planned for a later phase, not available now).
 - Uploading a document file from a device in Document management (it currently takes a link).
 - Background job processing, so anything that needs to run on a schedule or after a delay is not available.
@@ -190,8 +188,7 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
 - Forgot-password by email (only the email delivery layer exists so far). Admins can reset a member's password.
 - Emailing invoices, receipts, quotations or statements as attachments. No message templates, automations, campaigns, opt-outs
   or delivery confirmation. The Messaging Centre says "sent" only, never "delivered".
-- SMS of any kind.
-- Announcement email or SMS alerts, replies, and deleting announcements.
+- Announcement email alerts, replies, and deleting announcements.
 - Notification settings screen, overdue-item notifications.
 - Payroll: NSITF/ITF levies, NHIS and life-assurance reliefs, overtime, part-month proration, loans, and automatic filing or
   remittance of PAYE or pension.

@@ -2,6 +2,15 @@
 {% block title %}Demos{% endblock %}
 {% block body %}
 <div class="card">
+  <h2 style="margin-top:0">By Wednesday</h2>
+  <p class="mute">Only confirmed demos fill a Wednesday ({{ capacity }} per session). Tentative requests do not block anyone.</p>
+  {% for day, ds, confirmed in groups %}
+  <div><b>{{ day.strftime('%A %d %B %Y') }}</b> · confirmed {{ confirmed }}/{{ capacity }}{% if confirmed >= capacity %} <span class="badge">full</span>{% endif %}
+    · tentative {{ ds|length - confirmed }}
+    <div class="mute">{% for d in ds %}#{{ d.id }} {{ d.lead.display_name }} ({{ d.status }}){{ ', ' if not loop.last }}{% endfor %}</div></div>
+  {% else %}<p class="mute">No pencilled-in or confirmed demos.</p>{% endfor %}
+</div>
+<div class="card">
   <h2 style="margin-top:0">Demos</h2>
   <p class="mute">Reply <code>confirm &lt;id&gt;</code> or <code>decline &lt;id&gt; [new time]</code> on WhatsApp. Nothing is confirmed until you do.</p>
   <div class="table-scroll"><table>

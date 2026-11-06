@@ -105,7 +105,9 @@ answers safely (the team will confirm), the question is saved on the lead page u
 (throttled to one per 10 minutes per lead).
 
 **Demos.** Live demos run only on **Wednesdays at 10:00 AM WAT**, 30 minutes, with at least 2 hours' notice, and
-`DEMO_SLOTS_PER_SESSION` (default 1) demos per Wednesday (change the constants in `sentinel/business_facts.py`). The flow:
+`DEMO_SLOTS_PER_SESSION` (default 1) **confirmed** demos per Wednesday. Tentative requests never use up a slot, so several
+can be pencilled in for the same Wednesday and the bot never tells a prospect a Wednesday is full because of someone
+else's unconfirmed request; the Demos page lists the tentative requests per Wednesday (change the constants in `sentinel/business_facts.py`). The flow:
 
 1. A prospect asks for a demo: the bot sends the demo video for their product (both if the product is unknown) with a
    one-line description taken from the product notes, then asks whether they also want a personalised demo with the team.
@@ -122,7 +124,10 @@ answers safely (the team will confirm), the question is saved on the lead page u
 
 Commands from the owner number, and from staff numbers (staff may send only `confirm`, `decline` and `help`):
 
-- `confirm <demo id>`: confirms the demo and tells the lead. Refused if the Wednesday is already full.
+- `confirm <demo id>`: confirms the demo and tells the lead. Refused, with a message to whoever sent it, if that
+  Wednesday is already full of **confirmed** demos (use `decline <id> [new time]` instead) or if the start time has
+  already passed. If the demo starts in under the notice period (2 hours) it is still confirmed, with a warning in the reply.
+  Same rules for the owner and staff numbers.
 - `decline <demo id>`: declines it and offers the next two Wednesdays.
 - `decline <demo id> <new time>` (e.g. `decline 3 next Wednesday`): proposes the new time (it must be a free Wednesday at
   10:00) and creates a new tentative demo. Send `confirm <new id>` once they agree.
@@ -131,8 +136,16 @@ Demos are listed on the dashboard **Demos** page and on each lead page. Times ar
 (Monday to Friday, 9:00 AM to 5:00 PM WAT) the bot still answers and says when the team will reply.
 
 **Existing clients.** If a lead says they already use a Mega-Net product, is listed in `EXISTING_CLIENT_NUMBERS`
-(comma separated, digits only), or you tick **Existing client** on the lead page, the bot sends the support route and
-support hours instead of any sales flow or menu, stops follow-ups, and alerts you once. It is logged as
+(comma separated, digits only), or you tick **Existing client** on the lead page, every message from them is classified
+as support or sales:
+
+- **Support** (problems, how do I, my account, reports, errors): the bot sends the support route and support hours,
+  alerts you once, and runs no sales flow or menu.
+- **Sales** (they ask about EHR Cloud or ERP Cloud as something to buy, upgrading, migrating, moving to the cloud,
+  pricing or a demo): treated as a normal sales lead. The existing-client flag stays, the lead page shows
+  **Existing client, upgrade enquiry**, and you are alerted.
+
+Existing clients get no automatic follow-ups unless their latest message is a sales enquiry. Logged as
 `existing client lead=...`.
 
 **Settings page.** Shows every business fact and a red list of the constants still `TODO`. No secrets are shown.
