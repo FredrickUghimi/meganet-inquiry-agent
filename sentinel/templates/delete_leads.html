@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Delete leads{% endblock %}
+{% block body %}
+<div class="card" style="max-width:640px">
+  <h2 style="margin-top:0;color:#b91c1c">Delete {{ rows|length }} lead{{ 's' if rows|length != 1 }}?</h2>
+  {% if error %}<div class="banner" role="alert">{{ error }}</div>{% endif %}
+  <table>
+    <tr><th>ID</th><th>Name</th><th>Phone</th><th>Messages</th><th>Demos</th><th>Open questions</th></tr>
+    {% for r in rows %}<tr><td>{{ r.id }}</td><td>{{ r.name }}</td><td>{{ r.phone }}</td><td>{{ r.messages }}</td><td>{{ r.demos }}</td><td>{{ r.questions }}</td></tr>{% endfor %}
+  </table>
+  <p>This permanently removes {{ rows|length }} lead{{ 's' if rows|length != 1 }}, {{ totals.messages }} message(s), {{ totals.demos }} demo request(s) and {{ totals.questions }} open question(s). If they message again, they start as a brand-new lead.</p>
+  <form method="post" action="{{ url_for('dashboard.delete_leads') }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% for r in rows %}<input type="hidden" name="ids" value="{{ r.id }}">{% endfor %}
+    <label style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" name="understand" value="1" style="width:auto"> I understand this cannot be undone</label>
+    <p><button class="primary" style="background:#b91c1c;border-color:#b91c1c">Delete permanently</button>
+      <a class="btn" href="{{ url_for('dashboard.leads') }}">Cancel</a></p>
+  </form>
+</div>
+{% endblock %}

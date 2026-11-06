@@ -32,6 +32,63 @@ def mask_phone(raw):
     return digits[:3] + "*" * (len(digits) - 5) + digits[-2:]
 
 
+def mask_phone_detail(raw, head=6, tail=2):
+    """For lists and confirmation pages: keep the first 6 digits and the last 2 (234801*****78)."""
+    digits = normalize_phone(raw)
+    if not digits:
+        return "-"
+    if len(digits) <= head + tail:
+        return "*" * len(digits)
+    return digits[:head] + "*" * (len(digits) - head - tail) + digits[-tail:]
+
+
+# --- deleting leads ---------------------------------------------------------------------------
+
+def lead_counts(lead_ids):
+    """{lead_id: {"messages": n, "demos": n, "questions": n}} for the given ids (ids with no lead are left out)."""
+    ids = [i for i in lead_ids]
+    out = {i: {"messages": 0, "demos": 0, "questions": 0} for (i,) in db.session.query(Lead.id).filter(Lead.id.in_(ids))}
+    for key, model in (("messages", Message), ("demos", DemoRequest), ("questions", OpenQuestion)):
+        for lead_id, n in (db.session.query(model.lead_id, func.count(model.id))
+                           .filter(model.lead_id.in_(ids)).group_by(model.lead_id)):
+            if lead_id in out:
+                out[lead_id][key] = n
+    return out
+
+
+def delete_leads(lead_ids):
+    """Delete leads together with everything that belongs to them (messages, demo requests, open questions), in ONE
+    transaction. Reminder state, menu state and alert throttles live on the lead row, so they go with it. Touches no other
+    table. Returns {"leads", "messages", "demos", "questions"} counts. Logs one INFO line per lead, never message text."""
+    ids = sorted(set(int(i) for i in lead_ids))
+    counts = lead_counts(ids)
+    ids = [i for i in ids if i in counts]
+    totals = {"leads": len(ids), "messages": 0, "demos": 0, "questions": 0}
+    if not ids:
+        return totals
+    try:
+        for model in (OpenQuestion, DemoRequest, Message):  # children first (Postgres enforces the foreign keys)
+            model.query.filter(model.lead_id.in_(ids)).delete(synchronize_session=False)
+        Lead.query.filter(Lead.id.in_(ids)).delete(synchronize_session=False)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    db.session.expire_all()
+    for i in ids:
+        c = counts[i]
+        for k in ("messages", "demos", "questions"):
+            totals[k] += c[k]
+        log.info("lead deleted id=%s messages=%d demo_requests=%d open_questions=%d", i, c["messages"], c["demos"],
+                 c["questions"])
+    return totals
+
+
+def describe_deleted(t):
+    return (f"Deleted {t['leads']} lead(s): {t['messages']} message(s), {t['demos']} demo request(s), "
+            f"{t['questions']} open question(s).")
+
+
 # --- intake ---------------------------------------------------------------------------------
 
 def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp"):
@@ -309,7 +366,7 @@ def run_owner_reminders(now=None):
     for lead_id in [l.id for l in leads]:
         try:
             lead = db.session.get(Lead, lead_id)
-            if not is_waiting_state(lead):
+            if lead is None or not is_waiting_state(lead):  # deleted while this tick was running
                 continue
             since = reply_wait_since(lead)
             if since is None:

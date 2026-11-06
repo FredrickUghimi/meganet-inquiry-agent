@@ -93,6 +93,59 @@ def index():
     return redirect(url_for("dashboard.leads"))
 
 
+def _ids_from(values):
+    out = []
+    for v in values:
+        if str(v).isdigit():
+            out.append(int(v))
+    return sorted(set(out))
+
+
+def _delete_page(ids, error=None):
+    counts = service.lead_counts(ids)
+    rows = []
+    for lead_id in ids:
+        lead = db.session.get(Lead, lead_id)
+        if lead:
+            rows.append({"id": lead.id, "name": lead.name or "(no name)", "phone": service.mask_phone_detail(lead.phone),
+                         **counts[lead.id]})
+    if not rows:
+        flash("Nothing to delete: those leads no longer exist.")
+        return redirect(url_for("dashboard.leads"))
+    totals = {k: sum(r[k] for r in rows) for k in ("messages", "demos", "questions")}
+    return render_template("delete_leads.html", rows=rows, totals=totals, error=error), (400 if error else 200)
+
+
+@bp.get("/leads/<int:lead_id>/delete")
+@login_required
+def delete_lead_confirm(lead_id):
+    db.session.get(Lead, lead_id) or abort(404)
+    return _delete_page([lead_id])
+
+
+@bp.post("/leads/delete/confirm")
+@login_required
+def delete_selected_confirm():
+    ids = _ids_from(request.form.getlist("ids"))
+    if not ids:
+        flash("Select at least one lead first.")
+        return redirect(url_for("dashboard.leads", select=1))
+    return _delete_page(ids)
+
+
+@bp.post("/leads/delete")
+@login_required
+def delete_leads():
+    ids = _ids_from(request.form.getlist("ids"))
+    if not ids:
+        abort(400)
+    if request.form.get("understand") != "1":
+        return _delete_page(ids, error="Tick \"I understand this cannot be undone\" to delete.")
+    totals = service.delete_leads(ids)
+    flash(service.describe_deleted(totals))
+    return redirect(url_for("dashboard.leads"))
+
+
 @bp.get("/leads")
 @login_required
 def leads():
@@ -105,7 +158,8 @@ def leads():
         rows = [l for l in rows if service.reply_wait_since(l) is not None]
     rows.sort(key=lambda l: l.status != "ready")  # stable: ready leads float to the top
     rows.sort(key=lambda l: service.reply_wait_since(l) is None)  # then leads waiting for Fredrick above all
-    return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status)
+    return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status,
+                           select=request.args.get("select") == "1")
 
 
 @bp.get("/demos")

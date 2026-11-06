@@ -150,6 +150,30 @@ Existing clients get no automatic follow-ups unless their latest message is a sa
 
 **Settings page.** Shows every business fact and a red list of the constants still `TODO`. No secrets are shown.
 
+## Deleting leads (clearing test data)
+
+Deleting is permanent, so keep a copy first. In the Render Shell (or locally), from the project folder:
+
+```
+python scripts/manage_leads.py list                                # id, name, masked phone, status, created, messages, demos
+python scripts/manage_leads.py export --out /tmp/leads_export.csv  # copy of all leads, messages and demo requests
+python scripts/manage_leads.py delete --ids 2,3                    # DRY RUN: shows what would go, changes nothing
+python scripts/manage_leads.py delete --all-except 4,5             # dry run for everything except leads 4 and 5
+python scripts/manage_leads.py delete --ids 2,3 --yes              # really delete (one database transaction)
+python scripts/manage_leads.py delete --all --yes                  # delete every lead
+```
+
+`delete` always prints the lead ids and counts first. It removes each lead with its messages, demo requests and open
+questions (reminder state, menu state and alert throttles live on the lead and go with it), and nothing else. Message text
+is never printed or logged; each deletion logs one line (`lead deleted id=... messages=... demo_requests=... open_questions=...`).
+The export file does contain message text and phone numbers, so keep it private. Render's shell is not persistent: download or
+copy the export before the shell closes.
+
+**From the dashboard:** open a lead and tap **Delete lead**, or tap **Select** on the leads list, tick leads and tap
+**Delete selected**. Both open a confirmation page with the names, masked phone numbers and counts, and delete only after you
+tick **I understand this cannot be undone**. If a deleted person messages again, they start as a brand-new lead and get the
+first-contact menu.
+
 ## 5. Render plans
 
 - **Web service: Starter or higher (always on).** Free instances sleep after idle. A sleeping service misses Meta webhooks and its in-process follow-up scheduler stops. The service must also run exactly **one** worker (already set), or follow-ups would be sent twice.

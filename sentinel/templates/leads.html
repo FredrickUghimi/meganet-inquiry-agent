@@ -5,12 +5,19 @@
   <a href="{{ url_for('dashboard.leads') }}">{% if not current %}<b>All</b>{% else %}All{% endif %}</a>
   {% for s in statuses %}<a href="{{ url_for('dashboard.leads', status=s) }}">{% if current == s %}<b>{{ s.replace('_',' ') }}</b>{% else %}{{ s.replace('_',' ') }}{% endif %}</a>{% endfor %}
 </div>
+<div style="margin-bottom:12px">
+  {% if select %}<a href="{{ url_for('dashboard.leads', status=current) }}">Cancel select</a>
+  {% else %}<a href="{{ url_for('dashboard.leads', status=current, select=1) }}">Select</a>{% endif %}
+</div>
+{% if select %}<form method="post" action="{{ url_for('dashboard.delete_selected_confirm') }}">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endif %}
 <div class="card table-scroll">
 {% if leads %}
 <table>
-  <tr><th>Name</th><th>Contact</th><th>Product</th><th>Status</th><th>Last contact</th><th>Next follow-up</th></tr>
+  <tr>{% if select %}<th></th>{% endif %}<th>Name</th><th>Contact</th><th>Product</th><th>Status</th><th>Last contact</th><th>Next follow-up</th></tr>
   {% for l in leads %}
   <tr>
+    {% if select %}<td><input type="checkbox" name="ids" value="{{ l.id }}" aria-label="Select {{ l.display_name }}" style="width:auto"></td>{% endif %}
     <td><a href="{{ url_for('dashboard.lead_detail', lead_id=l.id) }}">{{ l.display_name }}</a>
       {% set w = wait_label(l) %}{% if w %}<div><span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span></div>{% endif %}
       {% if l.summary %}<div class="mute">{{ l.summary }}</div>{% endif %}</td>
@@ -26,4 +33,5 @@
   <p class="mute">No leads yet. They appear here when someone messages your WhatsApp number or you log an inquiry.</p>
 {% endif %}
 </div>
+{% if select %}<p><button class="primary" style="background:#b91c1c;border-color:#b91c1c">Delete selected</button></p></form>{% endif %}
 {% endblock %}

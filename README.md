@@ -175,6 +175,29 @@ Both are **on by default** and submitted by `--all` above (or by hand from `sent
 - **Template send fails with code 132001:** template name/language doesn't match an *approved* template.
 - **Alerts to Fredrick never arrive:** see the 24-hour note above.
 
+## Deleting leads (clearing test data)
+
+Deleting is permanent, so keep a copy first. In the Render Shell (or locally), from the project folder:
+
+```
+python scripts/manage_leads.py list                                # id, name, masked phone, status, created, messages, demos
+python scripts/manage_leads.py export --out /tmp/leads_export.csv  # copy of all leads, messages and demo requests
+python scripts/manage_leads.py delete --ids 2,3                    # DRY RUN: shows what would go, changes nothing
+python scripts/manage_leads.py delete --all-except 4,5             # dry run for everything except leads 4 and 5
+python scripts/manage_leads.py delete --ids 2,3 --yes              # really delete (one database transaction)
+python scripts/manage_leads.py delete --all --yes                  # delete every lead
+```
+
+`delete` always prints the lead ids and counts first. It removes each lead with its messages, demo requests and open
+questions (reminder state, menu state and alert throttles live on the lead and go with it), and nothing else. Message text
+is never printed or logged; each deletion logs one line (`lead deleted id=... messages=... demo_requests=... open_questions=...`).
+The export file does contain message text and phone numbers, so keep it private. 
+
+**From the dashboard:** open a lead and tap **Delete lead**, or tap **Select** on the leads list, tick leads and tap
+**Delete selected**. Both open a confirmation page with the names, masked phone numbers and counts, and delete only after you
+tick **I understand this cannot be undone**. If a deleted person messages again, they start as a brand-new lead and get the
+first-contact menu.
+
 ## Configuration reference
 
 Every setting is an environment variable. `.env.example` lists them all with comments. Required in production: `DASHBOARD_PASSWORD`, `SECRET_KEY`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `OWNER_WHATSAPP_NUMBER`. Webhook calls without a valid signature are rejected. Optional: `OWNER_TAKEOVER_HOURS`, `BOT_ANSWERS_AFTER_READY`, `EXISTING_CLIENT_NUMBERS`, `STAFF_WHATSAPP_NUMBERS`.
