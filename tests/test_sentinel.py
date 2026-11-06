@@ -37,7 +37,7 @@ def test_first_contact_creates_lead_and_auto_replies(app, sent, claude):
     lead = Lead.query.one()
     assert (lead.name, lead.phone, lead.source) == ("Amaka", "2348011111111", "whatsapp")
     assert lead.product_interest == "ehr_cloud" and lead.status == "new"
-    assert sent == [("text", "2348011111111", "reply:first_contact")]
+    assert sent == [("text", "2348011111111", "reply:first_product_reply")]
     assert lead.next_followup_at == lead.last_inbound_at + timedelta(days=1)
 
 
@@ -186,7 +186,7 @@ def test_dashboard_requires_login_and_actions(app, sent, claude):
         s["auth"], s["csrf"] = True, "tok"
     page = client.get("/leads").data.decode()
     assert "Mega-Net Lead Sentinel" in page and "Amaka" in page
-    assert "reply:first_contact" in client.get("/leads/1").data.decode()
+    assert "reply:first_product_reply" in client.get("/leads/1").data.decode()
     assert client.post("/leads/1/action", data={"action": "pause"}).status_code == 400  # csrf missing
     client.post("/leads/1/action", data={"action": "pause", "csrf": "tok"})
     lead = db.session.get(Lead, 1)

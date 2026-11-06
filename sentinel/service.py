@@ -6,7 +6,7 @@ from datetime import timedelta
 from flask import current_app
 from sqlalchemy import func
 
-from . import ai, emailer, menu, templates_meta, whatsapp
+from . import ai, emailer, knowledge, menu, templates_meta, whatsapp
 from . import business_facts, demo
 from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
 
@@ -1185,6 +1185,8 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         _record_open_question(lead, flag, result.get("question") or latest, newly_ready, say)
     if flag:
         situation = flag
+    elif first_contact and lead.product_interest in knowledge.FIRST_REPLIES:
+        situation = "first_product_reply"  # the product is known: the approved first reply
     elif first_contact:
         situation = "first_contact"
     elif newly_ready or (new_status == "ready" and intent in ("ready_demo", "ready_pricing")):
@@ -1204,8 +1206,12 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if is_open:
         now = utcnow()
         context = demo_context(lead, history, pending, now, intent)
+        fixed = None
+        if situation == "first_product_reply":
+            context += "\n" + knowledge.first_reply_brief(lead.product_interest, lead.name)
+            fixed = knowledge.first_reply(lead.product_interest, lead.name)  # the approved text is the fallback too
         ai.reset_draft_info()
-        turn = ai.draft_turn(lead, history, situation, context)
+        turn = ai.draft_turn(lead, history, situation, context, fallback_text=fixed)
         info = ai.last_draft_info()
         if info:
             say(f"draft stop_reason={info['stop_reason']} usage={info['usage']} retried={info['retried']} "
@@ -1330,9 +1336,9 @@ def _handle_choice(lead, choice, history, dry_run, say):
         return "skipped", "WhatsApp not configured (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)"
     if choice == "other":
         text, _ = _claude_text(lead, "other_choice", menu.OTHER_REPLY)
-    else:
-        ai.reset_draft_info()
-        text = ai.draft_reply(lead, history, "qualify")
+    else:  # they chose a product: the approved first product reply
+        text = ai.draft_turn(lead, history, "first_product_reply", knowledge.first_reply_brief(choice, lead.name),
+                             fallback_text=knowledge.first_reply(choice, lead.name), structured=False)["reply"]
     msg = send_whatsapp(lead, text=text)
     if choice == "other":
         send_owner_alert(lead, menu.OTHER_ALERT.format(name=lead.display_name))

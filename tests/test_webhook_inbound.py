@@ -37,7 +37,7 @@ def test_normal_number_creates_lead_replies_and_logs(app, sent, claude, caplog):
     assert post(app, text_value(LEAD)).status_code == 200
     lead = Lead.query.one()
     assert lead.phone == LEAD
-    assert sent == [("text", LEAD, "reply:first_contact")]
+    assert sent == [("text", LEAD, "reply:first_product_reply")]
     lines = webhook_lines(caplog)
     assert len(lines) == 1
     assert "kind=message" in lines[0] and "sender=234********11" in lines[0]
@@ -67,7 +67,7 @@ def test_owner_as_lead_flag_treats_owner_as_normal_lead(app, sent, claude):
     app.config["OWNER_AS_LEAD"] = True
     post(app, text_value(OWNER))
     assert Lead.query.one().phone == OWNER
-    assert ("text", OWNER, "reply:first_contact") in sent
+    assert ("text", OWNER, "reply:first_product_reply") in sent
 
 
 def test_status_update_creates_nothing_and_is_logged(app, sent, claude, caplog):
@@ -191,7 +191,7 @@ def test_sweeper_answers_stuck_unhandled_message(app, sent, claude):
     lead = service.find_or_create_lead(phone=LEAD, name="A")
     service.record_inbound(lead, "hello, we run a clinic", "whatsapp", external_id="w1", at=utcnow() - timedelta(minutes=10))
     service.run_unanswered()
-    assert sent == [("text", LEAD, "reply:first_contact")]
+    assert sent == [("text", LEAD, "reply:first_product_reply")]
     sent.clear()
     service.run_unanswered()
     assert sent == []
@@ -479,7 +479,8 @@ def test_fallback_path_logs_warning_and_adds_note(app, sent, monkeypatch, caplog
     post(app, text_value(LEAD, mid="wamid.a"))
     db.session.expire_all()  # the reply job commits from its own session
     lead = Lead.query.one()
-    assert sent[-1][2] == ai.FALLBACK_REPLIES["first_contact"]
+    from sentinel import knowledge
+    assert sent[-1][2] == knowledge.first_reply("ehr_cloud", "Amaka")  # the approved first reply is the fallback
     assert "fixed fallback" in lead.ai_note and "BadRequestError http=400" in lead.ai_note
     warns = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any("draft_reply FAILED" in w and "BadRequestError http=400" in w for w in warns)

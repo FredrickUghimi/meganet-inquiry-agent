@@ -11,7 +11,8 @@ import anthropic
 from flask import current_app
 
 from . import business_facts
-from .knowledge import EHR_CLOUD_KNOWLEDGE, ERP_CLOUD_KNOWLEDGE, PRODUCT_NOTES, VOICE
+from .knowledge import (BANNED_PHRASES, EHR_CLOUD_KNOWLEDGE, ERP_CLOUD_KNOWLEDGE, FIRST_REPLY_MAX_WORDS, PRODUCT_NOTES,
+                        VOICE)
 from .templates_meta import clean_param
 
 log = logging.getLogger(__name__)
@@ -297,8 +298,9 @@ REPLY_RULES = (
     "personally; ask nothing more.\n"
     "- Never repeat your previous message, or any message you sent in the last day. Ask at most one or two questions.\n"
     "- Never say a demo day is full or taken because of another person's request; offer only the days you are given.\n"
-    "- Plain text only, no markdown, no signature. About 90 words at most. Finish every sentence; never stop "
-    "mid-sentence."
+    "- Plain text only, no markdown, no signature. About 90 words at most (only the first reply about a product may run to "
+    f"{FIRST_REPLY_MAX_WORDS}). Never use the words comprehensive, 'entire operations' or all-in-one. Finish every sentence; "
+    "never stop mid-sentence."
 )
 
 SITUATIONS = {
@@ -333,6 +335,11 @@ SITUATIONS = {
         "The lead has a custom requirement. Say honestly what the notes show; do not promise it will be built; say "
         "Fredrick or a member of the team will confirm whether it is possible. Ask one short question about the need."
     ),
+    "first_product_reply": (
+        "This is your first reply to this lead about a product they have chosen or named. Use the APPROVED FIRST REPLY given "
+        "below as your base. It is the one reply allowed to be longer than 90 words, but never more than "
+        f"{FIRST_REPLY_MAX_WORDS}. Do not offer a demo or video unless they asked."
+    ),
     "holding": (
         "A person (Fredrick or the team) is handling this conversation. Acknowledge the customer's latest message in one "
         "or two sentences and say Fredrick or a member of the team will reply personally soon. Do not answer product "
@@ -366,6 +373,7 @@ FALLBACK_REPLIES = {
     "custom_request": ("Thanks for explaining. Fredrick or a member of our team will confirm whether that is possible "
                        "and come back to you."),
     "not_fit": "Understood, thanks for letting us know. If anything changes, message us any time.",
+    "first_product_reply": "Thank you for your interest in Mega-Net. Could you tell me what type of business you run, and the biggest challenge you want the software to solve?",
     "holding": "Thank you for your message. Fredrick or a member of our team has it and will reply to you personally soon.",
     "support_route": ("Thank you for your message. Existing clients should contact their usual Mega-Net support "
                       "representative through their established support channel."),
@@ -599,6 +607,15 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
         if _PRICE_RE.search(text):
             problems.append(("price", "Your last attempt contained a price or money amount, which is forbidden. Write it "
                                       "again with no amounts and no pricing details."))
+        low = text.lower()
+        if any(b in low for b in BANNED_PHRASES):
+            problems.append(("banned", "Your last attempt used a word we never use (comprehensive, entire operations, "
+                                       "all-in-one). Say it plainly without those words."))
+        if situation == "first_product_reply":
+            if len(text.split()) > FIRST_REPLY_MAX_WORDS:
+                problems.append(("long", f"Your last attempt was over {FIRST_REPLY_MAX_WORDS} words. Shorten it."))
+            if text.count("?") > 1:
+                problems.append(("questions", "Your last attempt asked more than one question. End with at most one."))
         if claims_confirmed(text):
             problems.append(("confirmed", "Your last attempt said a demo is confirmed or booked. Only the team confirms. "
                                           "Say it is pencilled in and the team will confirm."))
@@ -610,7 +627,9 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             info["retried"] = True
             turn2, stop2 = gen("\n" + " ".join(p[1] for p in problems))
             t2 = turn2["reply"]
-            if not t2 or stop2 == "max_tokens" or _PRICE_RE.search(t2) or claims_confirmed(t2) or repeats(t2, messages):
+            bad2 = (any(b in t2.lower() for b in BANNED_PHRASES)
+                    or (situation == "first_product_reply" and (len(t2.split()) > FIRST_REPLY_MAX_WORDS or t2.count("?") > 1)))
+            if not t2 or stop2 == "max_tokens" or _PRICE_RE.search(t2) or claims_confirmed(t2) or repeats(t2, messages) or bad2:
                 kinds = ",".join(p[0] for p in problems)
                 log.warning("claude draft_reply still failed the guard (%s); using the fixed fallback text", kinds)
                 if any(p[0] == "price" for p in problems):  # a price slipped in: the safe pricing reply

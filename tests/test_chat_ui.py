@@ -54,7 +54,7 @@ def test_composer_is_below_the_thread_oldest_to_newest(app, sent, claude):
     lead = ready_lead_with_messages(app, sent, claude)
     page = client(app).get(f"/leads/{lead.id}").data.decode()
     first, second = page.index("First question about EHR"), page.index("Second message")
-    reply_bot = page.index("reply:first_contact")
+    reply_bot = page.index("reply:first_product_reply")
     composer = page.index('id="composer"')
     assert page.index("Conversation") < first < second < composer
     assert first < reply_bot < composer or reply_bot < composer

@@ -106,7 +106,7 @@ def test_engaged_lead_behaviour_unchanged(app, sent, claude):
     claude["intent"] = "exploring"
     say(app, "wamid.a", "Hi, we run a clinic")
     say(app, "wamid.b", "We have 15 staff")
-    assert [s[2] for s in sent if s[1] == LEAD] == ["reply:first_contact", "reply:continue"]
+    assert [s[2] for s in sent if s[1] == LEAD] == ["reply:first_product_reply", "reply:continue"]
     assert alerts(sent) == [] and not holding(sent)
     lead = Lead.query.one()
     assert lead.status == "engaged" and lead.last_hold_reply_at is None

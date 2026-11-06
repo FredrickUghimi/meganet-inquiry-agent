@@ -5,7 +5,7 @@ import os
 import pytest
 
 from replay import ScriptedClaude, cl, turn  # noqa: F401
-from sentinel import ai, whatsapp
+from sentinel import ai, knowledge, whatsapp
 from sentinel.models import Lead, Message
 
 spec = importlib.util.spec_from_file_location(
@@ -52,7 +52,7 @@ def test_evaluate_runs_the_real_pipeline_in_dry_run_and_sends_and_stores_nothing
     assert "FAIL: " in lines[-1] and "scenarios passed" in lines[-1]
     assert len(cl.calls) == total  # Claude (mocked) was called once per scenario, for real, through the pipeline
     assert sent == [] and Lead.query.count() == real_leads  # nothing sent, nothing stored in the app's database
-    assert "[01] thanks plus price" in text and "bot:      You're welcome!" in text
+    assert "[04] thanks plus price" in text and "bot:      You're welcome!" in text
     with eval_app.app_context():  # the throwaway database: dry run wrote no replies either
         assert Message.query.filter_by(sender=None, direction="outbound", channel="whatsapp").filter(
             Message.external_id.is_(None), Message.body.contains("Pricing is tailored")).count() == 0
@@ -63,7 +63,8 @@ def test_a_good_reply_passes_and_the_summary_says_pass(app, sent, cl, monkeypatc
     cl.drafts.append(turn("You're welcome! Pricing is tailored to your needs and shared personally by Fredrick, and I can "
                           "arrange a demo whenever you like."))
     lines = []
-    passed, total = ev.evaluate(ev.make_eval_app(), ev.SCENARIOS[:1], out=lines.append)
+    price = [s for s in ev.SCENARIOS if s["name"].startswith("thanks plus price")]
+    passed, total = ev.evaluate(ev.make_eval_app(), price, out=lines.append)
     assert (passed, total) == (1, 1) and lines[-1].strip() == "PASS: 1/1 scenarios passed"
 
 
@@ -72,3 +73,28 @@ def test_without_an_api_key_it_says_so_and_exits_cleanly(monkeypatch, capsys):
     assert ev.main([]) == 0
     assert "ANTHROPIC_API_KEY is not set" in capsys.readouterr().out
     assert ev.main(["--list"]) == 0 and "thanks plus price" in capsys.readouterr().out
+
+
+def test_first_reply_scenarios_exist_and_the_approved_reply_passes_every_check():
+    firsts = [s for s in ev.SCENARIOS if s.get("first_reply")]
+    assert {s["first_reply"] for s in firsts} == {"erp_cloud", "ehr_cloud"} and len(firsts) >= 3
+    for sc in [s for s in firsts if "bare" in s["name"]]:
+        results = ev.check_reply(knowledge.first_reply(sc["first_reply"], "Amaka"), sc, [])
+        assert all(ok for _, ok, _ in results), results
+        assert {"uses the customer's name", "at most one question", "only confirmed features"} <= {n for n, _, _ in results}
+
+
+def test_first_reply_checks_catch_each_failure():
+    sc = [s for s in ev.SCENARIOS if s["name"] == "first ERP reply, bare inquiry"][0]
+    good = knowledge.first_reply("erp_cloud", "Amaka")
+
+    def failed(text):
+        return {n for n, ok, _ in ev.check_reply(text, sc, []) if not ok}
+    assert not failed(good)
+    assert "uses the customer's name" in failed(good.replace("Amaka", "there"))
+    assert "at most one question" in failed(good.replace("software to solve?", "software to solve? And your staff size?"))
+    assert "only confirmed features" in failed(good.replace("HR and payroll", "Branch management across all your locations"))
+    assert "only confirmed features" in failed(good.replace("HR and payroll", "AI that runs your business"))
+    assert "only confirmed features" in failed(good.replace("one place", "one comprehensive place"))
+    assert any(n.startswith("under 150") for n in failed(good + " word" * 20))
+    assert ev.check_reply(good, sc, [])[3][0] == "under 150 words"  # the first reply gets 150, others stay at 90

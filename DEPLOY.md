@@ -137,6 +137,15 @@ flow, so no stored state can make the bot repeat a canned line. Guardrails in co
   out). A customer repeating the same question is escalated with the reason "loop: customer repeated the same question".
   Complaints and questions the notes do not cover alert you as before.
 
+**First product reply.** The first reply to a lead whose product is known (named in their message, or chosen with the
+EHR Cloud / ERP Cloud button) is the approved text in `sentinel/knowledge.py` (`ERP_FIRST_REPLY`, `EHR_FIRST_REPLY`): the
+first name filled in, a short list of confirmed modules, and one closing question. Claude may adapt it to what the customer
+already wrote (for example skip the closing question), but it may not add features, use the words "comprehensive", "entire
+operations" or "all-in-one", go over 150 words, or ask two questions; a draft that does is regenerated, and if it still
+does, the approved text is sent as it is. To change what the bot claims, edit the text there and the matching "Customer-safe
+module summary" in the same file. `python scripts/eval_replies.py` checks the first replies too (name, one question, within
+150 words, only confirmed features).
+
 **Checking replies before you rely on them.** In the Render Shell run `python scripts/eval_replies.py` (needs
 `ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it). It runs 18 awkward
 customers (thanks plus price, a topic switch, a vague "ok", Pidgin, two questions at once, a Tuesday demo request, a

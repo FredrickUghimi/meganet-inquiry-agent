@@ -65,6 +65,30 @@ Modules that exist in the product:
 - Support: in-app support tickets to Mega-Net and a help center. There is no 24/7 live technical support; support hours
   are in the business facts.
 
+Customer-safe module summary (verified against the EHR Cloud code on 2026-11-06; say only this about the modules):
+- Patient registration and records: CONFIRMED. Demographics, next of kin, insurance and payer details, allergies, vitals,
+  diagnoses, immunizations, clinical notes, check-in.
+- Appointments: CONFIRMED. Provider availability, booking, reschedule and cancel, and an online booking page for each
+  facility that offers only the slots staff configure. Caveat: reminders are SMS and are covered by the SMS stance below.
+- Billing, payments and insurance claims: CONFIRMED. Invoices, payments (partial allowed), claims with approve or reject,
+  payers and tariffs, built around Nigerian health insurance (NHIS) with capitation and fee-for-service.
+- Lab, radiology and pharmacy: CONFIRMED. Lab orders, specimens and verified results; imaging orders and studies with
+  in-app critical-finding alerts; drug formulary, prescriptions and dispensing.
+- Inventory: CONFIRMED. Stock items, suppliers, purchase orders and a low-stock list.
+- Wards and admissions: CONFIRMED. Wards and beds, admit, transfer, discharge summary; nursing medication chart and handover.
+- Surgery and antenatal: CONFIRMED. Theatre board, surgical team, consent; antenatal registrations, visits, delivery outcome.
+- Reports and dashboards: CONFIRMED. Visits, Revenue, Lab, Pharmacy and Inventory dashboards, a multi-facility comparison and
+  data export.
+- Financial Sentinel: PARTLY. Rule-based detection of billing and revenue problems for a person to review; AI-written
+  explanations need the AI service switched on, detection works without it. It takes no action by itself.
+- Several facilities under one organisation, role-based access and audit logging: CONFIRMED. MFA is mandatory for some roles.
+- Use on a phone: UNKNOWN. It is used in a web browser; page layouts were checked at phone width during development but not
+  confirmed on a live site, and there are no Android or iPhone apps. Say only that it runs in a web browser.
+Never claim (NOT BUILT or UNKNOWN): a patient portal or patient app; Android or iPhone apps; accounting or a general ledger
+(EHR Cloud is not the ERP product); custom roles; payroll; that it is battle-tested, widely used or certified. Anything else
+not listed here: say Fredrick or the team will confirm. For anything about text messages or reminders, use only the gateway
+rule in the section below.
+
 System roles (nine, all system-defined):
 1. Super Admin (Mega-Net platform level, not a client role)
 2. Org Admin
@@ -157,6 +181,44 @@ Features that exist:
 - Business settings (name, address, contact, logo, currency, financial year start month), an audit trail, user management,
   password change, and in-app support tickets answered by the business's own Owner or Admin.
 - Multi-user with role-based access; every business is isolated from every other.
+- Passwords: a user can reset a forgotten password by email (a reset link), change it in the app, and an Admin can reset a
+  member's password.
+- Onboarding: public sign-up is switched off. Mega-Net sets up each business and its first Owner.
+
+Customer-safe module summary (verified against the ERP code on 2026-11-06; say only this about the modules):
+- Accounting and financial reports: CONFIRMED. Profit and Loss, Balance Sheet, Cash Flow, Trial Balance, General Ledger,
+  Receivables and Payables with ageing, customer and supplier statements, plus manual journal entries for accounting roles.
+  Caveat: Cash Flow covers operating cash movements only and there are no year-end closing entries.
+- Sales, invoicing and payments: CONFIRMED. Sales (cash and credit), quotations converted to invoices, receipts, sales
+  returns, PDF documents, payments from customers and to suppliers. Each posts to the accounts automatically.
+- Inventory and stock movements: CONFIRMED. Products and services, weighted-average costing, stock movements from sales,
+  purchases and returns. Caveat: stock changes come from those transactions; there is no manual stock adjustment, stocktake
+  or transfer between locations.
+- Low-stock monitoring: CONFIRMED. A reorder level per product, low-stock alerts on the dashboard and an in-app
+  notification when stock falls to that level. Caveat: nothing is alerted for a product whose reorder level is 0, and the
+  alerts appear in the app only (they are not sent by email or text message).
+- Purchasing and suppliers: CONFIRMED. Purchases (posted to the accounts automatically), purchase returns, suppliers with
+  balances and statements.
+- Customer records: CONFIRMED. Name, phone, email, address, notes, balance and statement.
+- Customer follow-ups: PARTLY. A next follow-up date, a notes log and a "follow-ups due" list. Caveat: you set the dates and
+  look at the list; nothing is sent to the customer automatically.
+- Sales pipeline: PARTLY. A light lead status (prospect, contacted, negotiating, won, lost) with a leads view and a summary.
+  Caveat: there are no deal values, forecasts or drag-and-drop boards. Call it "lead tracking", not a pipeline product.
+- HR and payroll: CONFIRMED. Employee records, departments and positions, leave requests with approve or reject; monthly
+  payroll runs with PAYE, pension and NHF, payslip PDFs, and posting to the accounts. Caveat: see the payroll gaps below.
+- Project tracking: PARTLY. Projects are job costing: tag sales, purchases and expenses to a project to see its revenue,
+  cost and profit against an optional budget. Caveat: no tasks, schedules or time tracking.
+- Business Sentinel: PARTLY. Five rule-based checks that flag unusual items. Caveat: it runs when someone presses Scan (not
+  automatically), it does not use AI, and its findings are not yet visible to the AI Business Assistant.
+- Use on a phone: PARTLY. It is a web app with a layout that adapts to phone screens, used in the phone's browser; some wide
+  tables still scroll sideways on a phone. There are no Android or iPhone apps and it is not an installable app.
+- Sales and purchases flowing into the accounts automatically: CONFIRMED (also expenses, payments, returns and payroll).
+Never claim (NOT BUILT or UNKNOWN): multiple branches or locations under one business (each business is one isolated space);
+tasks, scheduling or time tracking on projects; Android or iPhone apps, offline use or an installable app; AI inside Business
+Sentinel; scans that run by themselves; automatic follow-up prompts or messages to customers; deal values, forecasting or
+a drag-and-drop sales pipeline; manual stock adjustments, stocktakes or stock transfers; emailing invoices or statements as
+attachments; MFA; NSITF or ITF levies, overtime, loans, part-month proration or automatic filing of PAYE; that it is
+battle-tested, widely used or certified. Anything else not listed here: say Fredrick or the team will confirm.
 
 System roles (eight, system-defined, the same set for every business; a user picks their role at login):
 1. Owner (the person who registers the business)
@@ -188,7 +250,6 @@ Built, but may need switching on or setting up per client (do not promise they a
 - Currency is one per business and display only (default NGN); there is no conversion between currencies.
 
 Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is coming on a date):
-- Forgot-password by email (only the email delivery layer exists so far). Admins can reset a member's password.
 - Emailing invoices, receipts, quotations or statements as attachments. No message templates, automations, campaigns, opt-outs
   or delivery confirmation. The Messaging Centre says "sent" only, never "delivered".
 - Announcement email alerts, replies, and deleting announcements.
@@ -202,3 +263,76 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
   yet available to the AI Business Assistant.
 - Multi-factor authentication.
 """
+
+
+# --- Approved first product replies ---------------------------------------------------------------------------------
+# The first reply to a lead whose product is known. Every line was checked against the product code on 2026-11-06 (see the
+# "Customer-safe module summary" in each knowledge block). Claude may adapt the reply to what the customer already wrote
+# (reorder, drop a line that does not fit, skip the closing question when they have already told us their business and their
+# problem) but must not add features, and the reply stays within FIRST_REPLY_MAX_WORDS. Later replies stay under about 90.
+FIRST_REPLY_MAX_WORDS = 150
+BANNED_PHRASES = ("comprehensive", "entire operations", "all-in-one", "all in one")
+
+ERP_FIRST_REPLY = """\
+Hello {name}! Thank you for your interest in Mega-Net ERP Cloud.
+
+Mega-Net ERP Cloud is cloud-based business management and accounting software that brings your day-to-day operations into one place.
+
+It combines:
+\u2022 Accounting and financial reports
+\u2022 Sales, invoicing and payments
+\u2022 Inventory and stock management
+\u2022 Purchasing and suppliers
+\u2022 Customer records, with follow-up dates and notes
+\u2022 HR and payroll
+\u2022 Project costing, to see the cost and profit of each job
+\u2022 Business Sentinel, which checks your records for unusual items whenever you run a scan
+
+The modules work together, so your sales and purchases flow into the accounting automatically. It runs in a web browser, so there is nothing to install, and the layout adapts to phones.
+
+To suggest the best fit: what type of business do you run, and what's the biggest challenge you want the software to solve?"""
+
+EHR_FIRST_REPLY = """\
+Hello {name}! Thank you for your interest in Mega-Net EHR Cloud.
+
+Mega-Net EHR Cloud is cloud-based software that helps clinics and hospitals run patient care and billing from one platform.
+
+It covers:
+\u2022 Patient registration and records
+\u2022 Appointments, with an online booking page for each facility
+\u2022 Billing, payments and insurance claims, built around Nigerian health insurance (NHIS)
+\u2022 Lab, radiology and pharmacy
+\u2022 Inventory and purchase orders
+\u2022 Wards, admissions and discharge
+\u2022 Reports and dashboards, and Financial Sentinel, which flags possible billing problems for you to review
+
+Access is role-based, and one organisation can run several facilities. It runs in a web browser, so there is nothing to install.
+
+To suggest the best fit: is yours a clinic or a hospital, and what's the biggest challenge you want the software to solve?"""
+
+FIRST_REPLIES = {"erp_cloud": ERP_FIRST_REPLY, "ehr_cloud": EHR_FIRST_REPLY}
+
+
+def first_name(name):
+    parts = (name or "").strip().split()
+    return parts[0] if parts and parts[0].isalpha() else "there"
+
+
+def first_reply(product, name=None):
+    """The approved first reply for 'erp_cloud' / 'ehr_cloud' with the name filled in (None for any other product)."""
+    template = FIRST_REPLIES.get(product)
+    return template.format(name=first_name(name)) if template else None
+
+
+def first_reply_brief(product, name=None):
+    """Instructions plus the approved text, for the prompt of the first product reply."""
+    return (
+        "APPROVED FIRST REPLY (the lead's first message about this product). Base your reply on it, in the same order and "
+        "wording, with the name filled in. You may adapt it to what the customer has already written: drop or reorder lines "
+        "that do not fit, and skip the closing question if they have already said what business they run and their problem "
+        "(then end with one short question about a next step, or none). Never add a feature that is not in the approved text, "
+        f"never use the words {', '.join(repr(p) for p in BANNED_PHRASES)}, keep it to {FIRST_REPLY_MAX_WORDS} words at most "
+        "and end with at most ONE question. This is the only reply allowed to be longer than about 90 words. If the customer "
+        "asked a question, answer it first in one short sentence, then continue with the approved reply.\n---\n"
+        + first_reply(product, name) + "\n---"
+    )

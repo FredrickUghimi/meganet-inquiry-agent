@@ -65,7 +65,7 @@ def test_tap_sets_product_and_sends_qualifying_question(app, sent, claude):
     post(app, interactive_value(LEAD, "erp_cloud", "ERP Cloud"))
     lead = Lead.query.one()
     assert lead.product_interest == "erp_cloud" and lead.status == "engaged" and not lead.awaiting_choice
-    assert sent[-1] == ("text", LEAD, "reply:qualify")
+    assert sent[-1] == ("text", LEAD, "reply:first_product_reply")
     inbound = Message.query.filter_by(direction="inbound").order_by(Message.id.desc()).first()
     assert inbound.body == "ERP Cloud" and inbound.choice_id == "erp_cloud"
 
@@ -108,7 +108,7 @@ def test_typed_choice_works_like_a_tap(app, sent, claude, reply, product):
     claude["product"] = "unsure"
     post(app, text_value(LEAD, body=reply, mid="wamid.b"))
     assert Lead.query.one().product_interest == product
-    assert sent[-1] == ("text", LEAD, "reply:qualify")
+    assert sent[-1] == ("text", LEAD, "reply:first_product_reply")
 
 
 def test_typed_3_means_other(app, sent, claude):
@@ -127,7 +127,7 @@ def test_normal_message_ignores_menu(app, sent, claude):
 
 def test_digit_without_menu_is_not_a_choice(app, sent, claude):
     post(app, text_value(LEAD, body="2", mid="wamid.a"))
-    assert sent[-1] == ("text", LEAD, "reply:first_contact")
+    assert sent[-1] == ("text", LEAD, "reply:first_product_reply")
 
 
 def test_no_second_menu_within_six_hours(app, sent, claude):

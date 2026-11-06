@@ -148,7 +148,7 @@ def test_sales_message_is_a_normal_sales_lead_with_label_and_alert(app, sent, cl
     say(app, "We want to upgrade and move to the cloud with ERP Cloud", "wamid.u1")
     lead = Lead.query.one()
     assert lead.is_existing_client and lead.upgrade_enquiry
-    assert to(sent, LEAD) == ["reply:first_contact"]  # normal sales reply, not the support route
+    assert to(sent, LEAD) == ["reply:first_product_reply"]  # normal sales reply, not the support route
     assert len(to(sent, OWNER)) == 1 and "upgrade enquiry" in to(sent, OWNER)[0]
     assert "Existing client, upgrade enquiry" in client(app).get(f"/leads/{lead.id}").data.decode()
     assert service.next_followup_time(lead) is not None  # a sales lead may get follow-ups

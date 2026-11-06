@@ -208,7 +208,8 @@ def test_menu_text_counts_as_a_recent_bot_message(app, sent, claude):
 def test_fixed_text_only_when_claude_fails_with_warning_and_visible_note(chat, cl, caplog):
     cl.fail = True
     r = chat.say("Hi, we run a clinic and need EHR Cloud", )
-    assert r == [ai.FALLBACK_REPLIES["first_contact"]]
+    from sentinel import knowledge
+    assert r == [knowledge.first_reply("ehr_cloud", "Amaka")]
     assert any("fixed fallback" in rec.getMessage() for rec in caplog.records if rec.levelname == "WARNING")
     assert "fixed fallback" in chat.lead.ai_note
     html = _page(chat)
