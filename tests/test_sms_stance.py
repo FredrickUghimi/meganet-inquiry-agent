@@ -65,12 +65,12 @@ def test_prospect_asking_about_sms_reminders_gets_the_honest_facts_and_answer(ap
     assert "If asked about SMS, patient messages or appointment reminders" in system
     assert "Do you send SMS reminders to patients?" in draft["messages"][0]["content"]
     reply = sent[-1][2]
-    assert reply == HONEST
+    assert reply == knowledge.ai_opening("Amaka") + " " + HONEST  # the first message also says it is the AI assistant
     low = reply.lower()
     assert "gateway" in low and "team will confirm" in low and "built into" in low
     assert not re.search(r"does not exist|doesn't exist|unavailable|will be (ready|live)|works today|₦|\$|free", low)
 
 
 def test_erp_lead_prompt_has_no_sms_facts(app):
-    prompt = ai._system(Lead(product_interest="erp_cloud"), "x")
+    prompt = ai.system_text(ai._system(Lead(product_interest="erp_cloud"), "x"))
     assert "Appointment reminder SMS: built" not in prompt

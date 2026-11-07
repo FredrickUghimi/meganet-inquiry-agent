@@ -26,12 +26,16 @@ def test_at_least_fifteen_scenarios_covering_the_required_cases():
 
 def test_automatic_checks_catch_each_failure():
     sc = dict(expect=[r"Wednesday"], forbid=[r"personalised demonstration"])
-    good = "Live demos run on Wednesdays at 10:00 AM WAT. Which Wednesday suits you?"
+    good = ("Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. "
+            "Live demos run on Wednesdays at 10:00 AM WAT. Which Wednesday suits you?")
     assert all(ok for _, ok, _ in ev.check_reply(good, sc, ["Something quite different was said before."]))
 
     def failed(text, prior=()):
         return {name for name, ok, _ in ev.check_reply(text, sc, list(prior)) if not ok}
     assert "no repeated bot text" in failed(good, [good.replace("Which", "Which one")])
+    assert "AI disclosure once, never repeated" in failed(good.replace("Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. ", ""))
+    assert "AI disclosure once, never repeated" in failed(good, ["Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Hi."])
+    assert "no phone number, e-mail or website link" in failed(good + " See www.example.com or call 08012345678.")
     assert "no currency amounts" in failed("Wednesday works and it costs ₦500,000.")
     assert "no promises" in failed("Wednesday works, I guarantee it.")
     assert "no promises" in failed("Wednesday works and your demo is confirmed for 10:00.")
@@ -53,7 +57,7 @@ def test_evaluate_runs_the_real_pipeline_in_dry_run_and_sends_and_stores_nothing
     assert len(cl.calls) == total  # Claude (mocked) was called once per scenario, for real, through the pipeline
     assert sent == [] and Lead.query.count() == real_leads  # nothing sent, nothing stored in the app's database
     idx = [i for i, s in enumerate(ev.SCENARIOS, 1) if s["name"].startswith("thanks plus price")][0]
-    assert f"[{idx:02d}] thanks plus price" in text and "bot:      You're welcome!" in text
+    assert f"[{idx:02d}] thanks plus price" in text and "You're welcome!" in text
     with eval_app.app_context():  # the throwaway database: dry run wrote no replies either
         assert Message.query.filter_by(sender=None, direction="outbound", channel="whatsapp").filter(
             Message.external_id.is_(None), Message.body.contains("Pricing is tailored")).count() == 0
@@ -110,8 +114,8 @@ def test_first_reply_checks_catch_each_failure():
     assert "only confirmed features" in failed(good.replace("project costing", "project tracking"))
     assert "only confirmed features" in failed(good.replace("one place", "one comprehensive place"))
     assert "approved feature sentence kept" in failed(good.replace("HR and payroll", "payroll"))
-    assert any(n.startswith("under 150") for n in failed(good + " word" * 40))
-    assert ev.check_reply(good, sc, [])[3][0] == "under 150 words"  # the first reply gets 150, others stay at 90
+    assert any(n.startswith(f"under {knowledge.FIRST_REPLY_MAX_WORDS}") for n in failed(good + " word" * 40))
+    assert ev.check_reply(good, sc, [])[3][0] == f"under {knowledge.FIRST_REPLY_MAX_WORDS} words"  # the first reply gets 165, others stay at 90
 
 
 def test_first_reply_scenarios_pass_end_to_end_in_dry_run_with_the_link_inserted_by_code(app, sent, cl, monkeypatch):

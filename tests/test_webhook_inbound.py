@@ -257,7 +257,7 @@ GOOD = '{"intent": "ready_demo", "product": "ehr_cloud", "name": "Amaka", "summa
 def test_parse_clean_json():
     r = ai.parse_classification(GOOD)
     assert r == {"intent": "ready_demo", "product": "ehr_cloud", "name": "Amaka",
-                 "summary": "Clinic, 12 staff, wants a demo."}
+                 "summary": "Clinic, 12 staff, wants a demo.", "topic": "general"}
 
 
 def test_parse_json_in_code_fences_and_prose():
@@ -267,7 +267,7 @@ def test_parse_json_in_code_fences_and_prose():
 
 def test_parse_invalid_field_values_fall_back_safely():
     r = ai.parse_classification('{"intent": "buy-now!!", "product": "crm", "name": "null", "summary": 5}')
-    assert r == {"intent": "exploring", "product": "unsure", "name": None, "summary": ""}
+    assert r == {"intent": "exploring", "product": "unsure", "name": None, "summary": "", "topic": "general"}
 
 
 @pytest.mark.parametrize("junk", ["", "I cannot help with that.", "{not json", '{"product": "ehr_cloud"}', "[1, 2]"])
@@ -300,7 +300,7 @@ def test_default_model_is_configurable_default(monkeypatch):
 
 def test_anthropic_400_is_logged_as_error_and_shown_on_lead(app, sent, monkeypatch, caplog):
     def create(**kw):
-        if "system" in kw and "ONE JSON object" in kw["system"]:
+        if "system" in kw and "ONE JSON object" in ai.system_text(kw["system"]):
             raise make_400()
         return text_response("Thanks, tell me more.")
 
@@ -325,7 +325,7 @@ def test_successful_classification_clears_note_and_can_make_lead_ready(app, sent
     calls = {"n": 0}
 
     def create(**kw):
-        if "ONE JSON object" in kw.get("system", ""):
+        if "ONE JSON object" in ai.system_text(kw.get("system", "")):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise make_400()
@@ -348,7 +348,7 @@ def test_dry_run_trace_shows_classification_and_draft_text(app, sent, monkeypatc
     n = {"i": 0}
 
     def create(**kw):
-        if "ONE JSON object" in kw["system"]:
+        if "ONE JSON object" in ai.system_text(kw["system"]):
             return text_response(GOOD.replace("ready_demo", "exploring"))
         n["i"] += 1
         return text_response(["Hello from Mega-Net, thanks for writing about EHR Cloud.",
@@ -375,8 +375,8 @@ def scripted_client(monkeypatch, drafts, classify_text=None, seen=None):
 
     def create(**kw):
         if seen is not None:
-            seen.append(kw)
-        if "ONE JSON object" in kw["system"]:
+            seen.append(dict(kw, system=ai.system_text(kw["system"])))
+        if "ONE JSON object" in ai.system_text(kw["system"]):
             if classify_text is None:
                 raise make_400()
             return text_response(classify_text)
@@ -399,7 +399,7 @@ def test_max_tokens_cut_off_is_retried_and_never_sent_mid_sentence(app, sent, mo
     scripted_client(monkeypatch, [(cut, "max_tokens"), ("Fredrick shares pricing personally. What day suits you for a demo?", "end_turn")],
                     classify_text=GOOD.replace("ready_demo", "exploring"))
     post(app, text_value(LEAD))
-    assert sent[-1][2] == "Fredrick shares pricing personally. What day suits you for a demo?"
+    assert sent[-1][2] == "Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Fredrick shares pricing personally. What day suits you for a demo?"
     assert any("hit max_tokens" in r.getMessage() for r in caplog.records)
 
 
@@ -408,14 +408,16 @@ def test_max_tokens_twice_trims_to_last_complete_sentence(app, monkeypatch):
     scripted_client(monkeypatch, [(cut, "max_tokens"), (cut, "max_tokens")], classify_text=GOOD)
     lead = Lead(product_interest="ehr_cloud")
     text = ai.draft_reply(lead, [], "continue")
-    assert text == "Thanks, Fred. EHR Cloud keeps patient records in one digital registry, so the paper files are replaced."
+    assert text == ("Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Thanks, Fred. EHR Cloud keeps patient "
+                    "records in one digital registry, so the paper files are replaced.")
     assert ai.last_draft_info()["retried"] is True and not ai.last_draft_info()["fallback"]
 
 
 def test_max_tokens_with_no_complete_sentence_uses_fallback_not_fragment(app, monkeypatch):
     scripted_client(monkeypatch, [("Billing is built around", "max_tokens")] * 2, classify_text=GOOD)
     text = ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
-    assert text == ai.FALLBACK_REPLIES["continue"] and ai.last_draft_info()["fallback"]
+    assert text == "Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. " + ai.FALLBACK_REPLIES["continue"]
+    assert ai.last_draft_info()["fallback"]
 
 
 def test_reply_max_tokens_is_generous(app, monkeypatch):
@@ -450,7 +452,8 @@ def test_price_and_demo_message_becomes_ready_replies_without_prices_and_alerts_
 def test_reply_that_quotes_a_price_is_replaced_with_safe_text(app, monkeypatch, caplog):
     scripted_client(monkeypatch, [("It costs ₦500,000 per month. Want a demo?", "end_turn")] * 2, classify_text=GOOD)
     text = ai.draft_reply(Lead(product_interest="ehr_cloud"), [], "continue")
-    assert text == ai.FALLBACK_REPLIES["ready"] and "₦" not in text
+    assert text == "Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. " + ai.FALLBACK_REPLIES["ready"]
+    assert "₦" not in text
     assert any("failed a guard (price)" in r.getMessage() for r in caplog.records)
 
 
@@ -471,7 +474,7 @@ def test_history_sent_to_claude_has_earlier_answers_in_order(app, sent, monkeypa
 
 def test_fallback_path_logs_warning_and_adds_note(app, sent, monkeypatch, caplog):
     def create(**kw):
-        if "ONE JSON object" in kw["system"]:
+        if "ONE JSON object" in ai.system_text(kw["system"]):
             return text_response(GOOD.replace("ready_demo", "exploring"))
         raise make_400()
 
@@ -520,7 +523,7 @@ def classify_with(monkeypatch, responses, seen=None):
 
     def create(**kw):
         if seen is not None:
-            seen.append(kw)
+            seen.append(dict(kw, system=ai.system_text(kw["system"])))
         return queue.pop(0)
 
     monkeypatch.setattr(ai, "_get_client", lambda: fake_client(create))

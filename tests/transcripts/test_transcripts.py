@@ -225,7 +225,7 @@ def _page(chat_):
 
 def test_when_claude_works_no_fixed_text_is_used(chat, cl):
     r = chat.say("Hi, we run a clinic and need EHR Cloud", turn("Lovely, EHR Cloud suits clinics. How many staff do you have?"))
-    assert r == ["Lovely, EHR Cloud suits clinics. How many staff do you have?"]
+    assert r == ["Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Lovely, EHR Cloud suits clinics. How many staff do you have?"]
     assert not chat.lead.ai_note
 
 
@@ -330,7 +330,8 @@ def test_voice_note_is_passed_to_claude_in_context(app, sent, cl):
     value["messages"][0]["audio"] = {"id": "a1"}
     post(app, value)
     assert "[voice note]" in cl.calls[0]["user"]
-    assert sent[-1][2].startswith("I cannot listen")
+    assert sent[-1][2].endswith("I cannot listen to voice notes here. Could you type the main point?")
+    assert sent[-1][2].startswith("Hello Amaka! I'm Mega-Net Lead Sentinel")
     assert "A voice note, image or document shows as [voice note]" in ai.REPLY_RULES
 
 
@@ -473,7 +474,7 @@ def test_asked_to_reschedule_alerts_the_team(chat, cl):
 
 def test_malformed_or_unknown_structured_output_degrades_safely(chat, cl):
     r = chat.say("Hi, EHR Cloud please", turn("Happy to help.", "do_a_dance", share_video="vimeo", needs_human=None))
-    assert r == ["Happy to help."] and chat.lead.demo_state is None
+    assert r == ["Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Happy to help."] and chat.lead.demo_state is None
     r = chat.say("And ERP?", "Plain text, not JSON: ERP Cloud is for business accounts, sales and stock.")
     assert r == ["Plain text, not JSON: ERP Cloud is for business accounts, sales and stock."]
     assert ai.parse_turn("not json") is None and ai.parse_turn('{"nope": 1}') is None

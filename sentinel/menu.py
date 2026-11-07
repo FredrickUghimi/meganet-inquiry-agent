@@ -3,7 +3,7 @@ Wording lives here as constants so it can be changed in one place."""
 import re
 from datetime import timedelta
 
-MENU_BODY = ("Hello 👋 Welcome to Mega-Net Software. What can we help you with? "
+MENU_BODY = ("Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. What can we help you with? "
              "EHR Cloud is for clinics and hospitals. ERP Cloud is for business accounts, sales and stock.")
 MENU_BUTTONS = (  # (id, title); WhatsApp allows 3 buttons, titles up to 20 characters
     ("ehr_cloud", "EHR Cloud"),

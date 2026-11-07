@@ -2,18 +2,14 @@
 
 Claude is instructed to state nothing about features, prices or timelines beyond this text.
 The more accurate it is, the better the replies. Keep it short and factual.
+
+The company core and the on-demand sections (other products, Academy, software development, partnership) are in
+knowledge_base.py; this file keeps the verified EHR Cloud and ERP Cloud notes, which stay authoritative for those products.
 """
+from . import knowledge_base
 
-PRODUCT_NOTES = """\
-Company: Mega-Net Software. Founder: Fredrick. Both products are cloud software.
-
-Mega-Net EHR Cloud: cloud electronic health records for clinics and hospitals.
-Mega-Net ERP Cloud: cloud ERP for businesses (operations, finance, inventory).
-
-Pricing: not quoted by the assistant. Fredrick shares pricing personally after learning about the customer's needs. Never explain how pricing is determined.
-Demos: a product demonstration video, and personalised live demonstrations with the Mega-Net team (days, hours and
-channels are in the business facts). Every booking is subject to confirmation by the team.
-"""
+# The always-loaded company and product core (one line per product). See knowledge_base.py.
+PRODUCT_NOTES = knowledge_base.CORE
 
 VOICE = """\
 Voice: direct, warm, concise, confident but never salesy. Plain sentences. No filler openers
@@ -58,8 +54,9 @@ Modules that exist in the product:
 - Document management: document registry with categories and a confidential flag.
 - Business insights: Visits, Revenue, Lab, Pharmacy and Inventory dashboards, a multi-facility comparison, and data export.
 - Financial Sentinel: rule-based detection of revenue-integrity problems (unbilled service, duplicate transaction,
-  capitation/fee-for-service conflict, rejected-claim pattern, stale claim, tariff drift), each with an AI-written
-  explanation for a human to review. It detects and explains only; it takes no action by itself.
+  capitation/fee-for-service conflict, rejected-claim pattern, stale claim, tariff drift), each with a plain-English
+  explanation for a human to review (written by AI only when the AI service is configured). The detection is not AI-powered.
+  It detects and explains only; it takes no action by itself.
 - Staff management and security: facilities and staff memberships, role-based permissions, row-level data isolation per
   organization, audit logging, authenticator-app MFA.
 - Support: in-app support tickets to Mega-Net and a help center. There is no 24/7 live technical support; support hours
@@ -97,10 +94,9 @@ Customer-safe module summary (verified against the EHR Cloud code on 2026-11-06;
   "each organisation's data stays separate and staff access is set per facility", never that facilities cannot see each other.
 - Cloud use with no server: CONFIRMED. A cloud-hosted multi-tenant web app used in a browser; the customer buys and runs no
   server.
-- Use on Android and iPhone browsers: UNKNOWN. It is used in a web browser and pages were checked at phone width during
-  development, but this was not confirmed on a live site, and there are no Android or iPhone apps. Say only that it runs in a
-  browser.
-Never claim (NOT BUILT or UNKNOWN): a patient portal or patient app; Android or iPhone apps or confirmed phone support;
+- Where it runs: CONFIRMED. A web app used in a web browser. Say only that it runs in a web browser;
+  say nothing about phones, tablets, apps or app stores.
+Never claim (NOT BUILT or UNKNOWN): a patient portal or patient app; any mobile app or phone support;
 accounting or a general ledger (EHR Cloud is not the ERP product); custom roles; payroll; that facilities cannot see each
 other's patients at organisation level; that online booking works without staff setting up availability; that it is
 battle-tested, widely used or certified. Anything else not listed here: say Fredrick or the team will confirm. For anything
@@ -227,11 +223,11 @@ Customer-safe module summary (verified against the ERP code on 2026-11-06; say o
   cost and profit against an optional budget. Caveat: no tasks, schedules or time tracking.
 - Business Sentinel: PARTLY. Five rule-based checks that flag unusual items. Caveat: it runs when someone presses Scan (not
   automatically), it does not use AI, and its findings are not yet visible to the AI Business Assistant.
-- Use on a phone: PARTLY. It is a web app with a layout that adapts to phone screens, used in the phone's browser; some wide
-  tables still scroll sideways on a phone. There are no Android or iPhone apps and it is not an installable app.
+- Where it runs: CONFIRMED. A web app used in a web browser. Say only that it runs in a web browser;
+  say nothing about phones, tablets, apps or app stores.
 - Sales and purchases flowing into the accounts automatically: CONFIRMED (also expenses, payments, returns and payroll).
 Never claim (NOT BUILT or UNKNOWN): multiple branches or locations under one business (each business is one isolated space);
-tasks, scheduling or time tracking on projects; Android or iPhone apps, offline use or an installable app; AI inside Business
+tasks, scheduling or time tracking on projects; any mobile app, offline use or an installable app; AI inside Business
 Sentinel; scans that run by themselves; automatic follow-up prompts or messages to customers; deal values, forecasting or
 a drag-and-drop sales pipeline; manual stock adjustments, stocktakes or stock transfers; emailing invoices or statements as
 attachments; MFA; NSITF or ITF levies, overtime, loans, part-month proration or automatic filing of PAYE; that it is
@@ -288,17 +284,17 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
 # block); lines that were only partly true are softened. The video link is NEVER written here or in a prompt: the text carries
 # the placeholder below and the code inserts the exact link from business_facts.PRODUCT_DEMO_VIDEOS. Claude may adapt the reply
 # to what the customer already wrote but must not add features, and it stays within FIRST_REPLY_MAX_WORDS.
-FIRST_REPLY_MAX_WORDS = 150
+FIRST_REPLY_MAX_WORDS = 165  # was 150; the AI-disclosure sentence added to the opening fits in the extra 15
 BANNED_PHRASES = ("comprehensive", "entire operations", "all-in-one", "all in one")
 VIDEO_PLACEHOLDER = "{video_url}"
 OFFER_LINE_RE = r"personali[sz]ed\s+live\s+demos?\s+(are\s+)?held"
 
 ERP_FIRST_REPLY = """\
-{hello} Thank you for your interest in Mega-Net ERP Cloud.
+{opening} Thank you for your interest in Mega-Net ERP Cloud.
 
 Mega-Net ERP Cloud is cloud-based business management and accounting software that brings your day-to-day operations into one place. It combines accounting and financial reports, sales and invoicing, inventory, purchasing and suppliers, customer records, HR and payroll, project costing, and Business Sentinel, which checks your records for unusual items whenever you run a scan.
 
-The modules work together, so your sales and purchases flow into the accounting automatically, and you use it in a web browser, with a layout that adapts to phones.
+The modules work together, so your sales and purchases flow into the accounting automatically, and it runs in a web browser.
 
 Watch our product demonstration:
 {video_url}
@@ -308,7 +304,7 @@ Watch our product demonstration:
 What type of business do you run, and what's the biggest challenge you want the software to solve?"""
 
 EHR_FIRST_REPLY = """\
-{hello} Thank you for your interest in Mega-Net EHR Cloud.
+{opening} Thank you for your interest in Mega-Net EHR Cloud.
 
 Mega-Net EHR Cloud is cloud-based electronic health records and hospital management software for clinics and hospitals. It combines patient records, appointments, doctor consultations, nursing workflows, prescriptions, laboratory and radiology, pharmacy, inventory, billing and insurance claims, reports, and Financial Sentinel, which flags possible billing problems for you to review.
 
@@ -329,6 +325,24 @@ def first_name(name):
     return parts[0] if parts and parts[0].isalpha() else None
 
 
+# --- AI disclosure ---------------------------------------------------------------------------------------------------
+# The first message of every conversation says what the bot is. Said once, never repeated, never a claim to be human.
+AI_INTRO = "I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant."
+AI_INTRO_RE = r"I['\u2019]m Mega-Net Lead Sentinel"
+HONEST_AI_ANSWER = ("Yes, I'm an AI assistant, not a person. A member of the Mega-Net team follows up personally.")
+
+
+def greeting(name=None):
+    first = first_name(name)
+    return f"Hello {first}!" if first else "Hello!"
+
+
+def ai_opening(name=None):
+    """'Hello {name}! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant.' The product sentence follows it in the first
+    product reply (the templates below)."""
+    return f"{greeting(name)} {AI_INTRO}"
+
+
 def _clock(h, m):
     return f"{(h % 12) or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
 
@@ -340,19 +354,19 @@ def demo_line():
     return f"Personalised live demos are held every {bf.DEMO_WEEKDAY} at {_clock(h, m)} (WAT), subject to confirmation."
 
 
-def first_reply(product, name=None):
+def first_reply(product, name=None, disclosed=False):
     """The approved first reply for 'erp_cloud' / 'ehr_cloud' with the name ("Hello!" when unknown) and the demo line
-    filled in. The video placeholder is left in for the code to replace with the exact stored link (None for any other
-    product)."""
+    filled in. It opens with the AI disclosure unless the bot already introduced itself in this conversation (`disclosed`,
+    for example after the welcome menu). The video placeholder is left in for the code to replace with the exact stored
+    link (None for any other product)."""
     template = FIRST_REPLIES.get(product)
     if not template:
         return None
-    first = first_name(name)
-    return (template.replace("{hello}", f"Hello {first}!" if first else "Hello!")
-            .replace("{demo_line}", demo_line()))
+    opening = greeting(name) if disclosed else ai_opening(name)
+    return template.replace("{opening}", opening).replace("{demo_line}", demo_line())
 
 
-def first_reply_brief(product, name=None):
+def first_reply_brief(product, name=None, disclosed=False):
     """Instructions plus the approved text, for the prompt of the first product reply. The text contains the video
     placeholder, never a link."""
     return (
@@ -365,7 +379,7 @@ def first_reply_brief(product, name=None):
         "sent in the last 24 hours; and if their first message is itself a request for a demo, keep this same structure. "
         "Never add a feature that is not in the approved text, never use the words "
         f"{', '.join(repr(p) for p in BANNED_PHRASES)}, keep it to {FIRST_REPLY_MAX_WORDS} words at most and end with at most "
-        "ONE question. This is the only reply allowed to be longer than about 90 words. If the customer asked a question, "
+        "ONE question. Keep the opening sentences exactly as they are. This is the only reply allowed to be longer than about 90 words. If the customer asked a question, "
         "answer it first in one short sentence, then continue with the approved reply.\n---\n"
-        + first_reply(product, name) + "\n---"
+        + first_reply(product, name, disclosed) + "\n---"
     )

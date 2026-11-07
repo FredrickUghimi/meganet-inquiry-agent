@@ -81,7 +81,7 @@ def test_demos_page_groups_tentative_per_wednesday(app, sent, cl):
 
 
 def test_prompt_never_says_a_day_is_full_because_of_others(app):
-    prompt = ai._system(Lead(product_interest="ehr_cloud"), "x")
+    prompt = ai.system_text(ai._system(Lead(product_interest="ehr_cloud"), "x"))
     assert "Never tell a prospect that a day or slot is full or taken because of someone else's request" in prompt
     assert "Never say a demo day is full or taken because of another person's request" in ai.REPLY_RULES
 

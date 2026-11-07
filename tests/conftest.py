@@ -39,8 +39,8 @@ def claude(monkeypatch):
                         error="mock: fixed-purpose draft")
         return dict(ai.blank_turn(ai.draft_reply(lead, msgs, situation)), fallback=False, error=None)
 
-    def scripted_turn(lead, msgs, situation, context="", fallback_text=None, structured=True):
-        state["calls"].append({"situation": situation, "context": context, "structured": structured,
+    def scripted_turn(lead, msgs, situation, context="", fallback_text=None, structured=True, topic=None):
+        state["calls"].append({"situation": situation, "context": context, "structured": structured, "topic": topic,
                                "lead_id": getattr(lead, "id", None)})
         if state["script"]:
             item = dict(state["script"].pop(0))

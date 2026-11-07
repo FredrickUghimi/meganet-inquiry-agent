@@ -464,7 +464,7 @@ def _record_open_question(lead, flag, question, already_alerted, say):
     say(f"open question recorded ({flag}); owner {'alerted' if sent_alert else 'alert FAILED'}")
 
 
-# One-line descriptions use only what PRODUCT_NOTES says about each product; never what a video contains.
+# One-line descriptions use only what the core product notes say about each product; never what a video contains.
 VIDEO_BLURB = {"ehr_cloud": "our cloud electronic health records system for clinics and hospitals",
                "erp_cloud": "our cloud ERP for businesses (operations, finance and inventory)"}
 PERSONALISED_RE = re.compile(r"personali[sz]ed\s+(live\s+)?(demo|demonstration)", re.I)
@@ -1212,7 +1212,11 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         outcome = _existing_client_message(lead, result, latest, dry_run, say)
         if outcome:
             return outcome
+    topic, other_product = ai.resolve_topic(result, latest)
+    say(f"topic={topic}" + (f" ({other_product})" if other_product else ""))
     hint = ai.heuristic_intent(latest)
+    if topic == "academy":
+        hint = None  # Academy fees and dates are the Academy team's, not a Mega-Net software pricing lead
     if hint and result["intent"] == "exploring":
         say(f"keyword safety net: latest message asks about {'pricing' if hint == 'ready_pricing' else 'a demo'}; "
             f"upgrading intent exploring -> {hint}")
@@ -1250,8 +1254,13 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if human_handled(lead):
         return _waiting_reply(lead, newly_ready, dry_run, say)
     flag = result.get("flag")
+    question = result.get("question") or latest
+    t_flag, t_tag = ai.topic_flag(topic, latest)
+    if t_flag and flag in (None, "none", "unanswered", "custom_request"):  # these topics always go to a person
+        flag, question = t_flag, f"[{t_tag}] {question}"
+        say(f"topic {topic} is referred to the team with an owner alert")
     if flag and not dry_run:
-        _record_open_question(lead, flag, result.get("question") or latest, newly_ready, say)
+        _record_open_question(lead, flag, question, newly_ready, say)
     if flag:
         situation = flag
     elif first_contact and lead.product_interest in knowledge.FIRST_REPLIES:
@@ -1277,13 +1286,14 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         context = demo_context(lead, history, pending, now, intent)
         fixed = None
         if situation == "first_product_reply":
-            context += "\n" + knowledge.first_reply_brief(lead.product_interest, lead.name)
-            fixed = knowledge.first_reply(lead.product_interest, lead.name)  # the approved text is the fallback too
+            disclosed = ai.ai_disclosed(history)
+            context += "\n" + knowledge.first_reply_brief(lead.product_interest, lead.name, disclosed)
+            fixed = knowledge.first_reply(lead.product_interest, lead.name, disclosed)  # the approved text is the fallback too
         ai.reset_draft_info()
-        turn = ai.draft_turn(lead, history, situation, context, fallback_text=fixed)
+        turn = ai.draft_turn(lead, history, situation, context, fallback_text=fixed, topic=topic)
         info = ai.last_draft_info()
         if info:
-            say(f"draft stop_reason={info['stop_reason']} usage={info['usage']} retried={info['retried']} "
+            say(f"draft topic={info['topic']} stop_reason={info['stop_reason']} usage={info['usage']} retried={info['retried']} "
                 f"fallback={info['fallback']}" + (f" ({info['error']})" if info["fallback"] else ""))
         if turn.get("fallback"):
             log.warning("Lead %s: reply used fixed fallback text: %s", lead_id, turn.get("error"))
@@ -1406,8 +1416,9 @@ def _handle_choice(lead, choice, history, dry_run, say):
     if choice == "other":
         text, _ = _claude_text(lead, "other_choice", menu.OTHER_REPLY)
     else:  # they chose a product: the approved first product reply, with the exact video link inserted by code
-        text = ai.draft_turn(lead, history, "first_product_reply", knowledge.first_reply_brief(choice, lead.name),
-                             fallback_text=knowledge.first_reply(choice, lead.name), structured=False)["reply"]
+        disclosed = ai.ai_disclosed(history)
+        text = ai.draft_turn(lead, history, "first_product_reply", knowledge.first_reply_brief(choice, lead.name, disclosed),
+                             fallback_text=knowledge.first_reply(choice, lead.name, disclosed), structured=False)["reply"]
         text, _ = finish_first_reply(lead, text, utcnow())
     msg = send_whatsapp(lead, text=text)
     if choice == "other":

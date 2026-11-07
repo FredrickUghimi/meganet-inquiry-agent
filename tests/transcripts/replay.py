@@ -23,7 +23,7 @@ class ScriptedClaude:
         monkeypatch.setattr(ai, "_get_client", lambda: fake_client(self.create))
 
     def create(self, **kw):
-        system = kw["system"]
+        system = ai.system_text(kw["system"])  # the prompt is sent as cached blocks; tests read it as text
         if "ONE JSON object" in system:  # classification
             return text_response(json.dumps(self.classification))
         if "too similar to one you already sent" in system:  # the send-time repeat guard

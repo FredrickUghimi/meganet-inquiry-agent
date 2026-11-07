@@ -144,16 +144,16 @@ demonstration video, the Wednesday live-demo line (built from `business_facts.py
 is never in a template or a prompt: the text has a `{video_url}` placeholder and the code inserts the exact link from
 `PRODUCT_DEMO_VIDEOS`, skipping the video if the same one went out in the last 24 hours and removing any other link. Claude
 may adapt the reply to what the customer already wrote (for example skip the closing question), but it may not add features,
-use the words "comprehensive", "entire operations" or "all-in-one", go over 150 words, or ask two questions; a draft that
+use the words "comprehensive", "entire operations" or "all-in-one", go over 165 words, or ask two questions; a draft that
 does is regenerated, and if it still does, the approved text is sent as it is. When the reply goes out the code records that
 the video was sent and that the live-demo offer was made, so there is no second video or offer within 24 hours, and a
 reply such as "yes, Wednesday works" is treated as accepting the offer. To change what the bot claims, edit the text there
 and the matching "Customer-safe module summary" in the same file. `python scripts/eval_replies.py` checks the first replies
-too (name, one question, within 150 words, the product's own link exactly as stored, the Wednesday line, confirmed features
+too (name, one question, within 165 words, the product's own link exactly as stored, the Wednesday line, confirmed features
 only).
 
 **Checking replies before you rely on them.** In the Render Shell run `python scripts/eval_replies.py` (needs
-`ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it). It runs 18 awkward
+`ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it). It runs 32 awkward
 customers (thanks plus price, a topic switch, a vague "ok", Pidgin, two questions at once, a Tuesday demo request, a
 complaint, a voice note, a request for a human, repeated questions, a long silence and more) through the real pipeline
 with the real Claude in dry-run mode, using a temporary database, so nothing is sent and nothing is stored. Each reply

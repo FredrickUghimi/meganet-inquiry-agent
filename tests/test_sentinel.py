@@ -214,8 +214,8 @@ def fake_anthropic(monkeypatch, product="unsure"):
     prompts = []
 
     def create(**kw):
-        prompts.append(kw["system"])
-        if "ONE JSON object" in kw["system"]:
+        prompts.append(ai.system_text(kw["system"]))
+        if "ONE JSON object" in ai.system_text(kw["system"]):
             block = SimpleNamespace(type="text", text=json.dumps(
                 {"intent": "exploring", "product": product, "name": None, "summary": "s"}))
         else:
@@ -231,14 +231,14 @@ def assert_baseline(system):
 
 
 def test_ehr_lead_prompt_has_ehr_facts_only(app):
-    system = ai._system(Lead(product_interest="ehr_cloud"), "x")
+    system = ai.system_text(ai._system(Lead(product_interest="ehr_cloud"), "x"))
     assert_baseline(system)
     assert EHR_CLOUD_KNOWLEDGE in system and ERP_CLOUD_KNOWLEDGE not in system
     assert "the EHR Cloud knowledge above" in system and "ERP Cloud knowledge" not in system
 
 
 def test_erp_lead_prompt_has_erp_facts_only(app):
-    system = ai._system(Lead(product_interest="erp_cloud"), "x")
+    system = ai.system_text(ai._system(Lead(product_interest="erp_cloud"), "x"))
     assert_baseline(system)
     assert ERP_CLOUD_KNOWLEDGE in system and EHR_CLOUD_KNOWLEDGE not in system
     assert "the ERP Cloud knowledge above" in system and "EHR Cloud knowledge" not in system
@@ -246,7 +246,7 @@ def test_erp_lead_prompt_has_erp_facts_only(app):
 
 def test_unsure_or_undetermined_lead_prompt_has_neither(app):
     for interest in ("unsure", None, "something_else"):
-        system = ai._system(Lead(product_interest=interest), "x")
+        system = ai.system_text(ai._system(Lead(product_interest=interest), "x"))
         assert_baseline(system)
         assert EHR_CLOUD_KNOWLEDGE not in system and ERP_CLOUD_KNOWLEDGE not in system
         assert "from the voice guide and product notes above" in system

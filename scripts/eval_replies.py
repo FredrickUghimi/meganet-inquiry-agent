@@ -8,8 +8,8 @@ Each scenario builds a throwaway lead in a TEMPORARY database (never your real o
 dry_run=True: Claude is called for real, but nothing is sent to WhatsApp and nothing is written to your database. It
 prints each reply with automatic checks and a PASS or FAIL summary. Exit code 1 if anything fails.
 
-Automatic checks: no repeated bot text (similarity above 0.8), no currency amounts, no promises, under 90 words, and the
-latest question is addressed (a keyword check per scenario, so a human should still skim the replies)."""
+Automatic checks: no repeated bot text (similarity above 0.8), no currency amounts, no promises, under 90 words, the AI
+disclosure exactly once in the conversation, no phone number or website, and the latest question is addressed (a keyword check per scenario, so a human should still skim the replies)."""
 import argparse
 import ast
 import os
@@ -94,6 +94,36 @@ SCENARIOS = FIRST_REPLY_SCENARIOS + [
          history=[("in", "Do you send SMS reminders to patients?", 0)], expect=[r"gateway", r"team|confirm"]),
     dict(name="typos and shouting", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "helo i need sofware for my clinik pls wat do u hav???", 0)], expect=[r"EHR|clinic"]),
+    # --- Master Knowledge Base topics (company, other products, Academy, development, partnership, retired names) ---
+    dict(name="what is Mega-Net Software", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "What is Mega-Net Software?", 0)], expect=[r"software", r"Nigeria|healthcare|business"],
+         forbid=[r"https?://|\.com\.ng|\bwww\."]),
+    dict(name="HospitalPro", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "What is HospitalPro and how is it different from your EHR Cloud?", 0)],
+         expect=[r"HospitalPro", r"local|install|on-premise|premises", r"cloud"], forbid=[r"https?://"]),
+    dict(name="PharmacyPro", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "Do you have software just for my pharmacy? I heard of PharmacyPro", 0)],
+         expect=[r"PharmacyPro", r"stock|inventory|dispens"], forbid=[r"₦|price is"]),
+    dict(name="Academy fees and dates", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "Tell me about Mega-Net Academy. How much is the Python course and when does it start?", 0)],
+         expect=[r"Academy", r"team"], forbid=[r"₦|\$|\bnaira\b", r"starts? on|begins? on|enrol(?:l)?ment is open"]),
+    dict(name="BuildBuddy", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "What is BuildBuddy?", 0)], expect=[r"BuildBuddy", r"coding|guidance|architecture"],
+         forbid=[r"https?://"]),
+    dict(name="custom software", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "Can you build me a custom delivery app for my logistics company? How long will it take?", 0)],
+         expect=[r"team|assess|technical"], forbid=[r"we will build|we can build it in|weeks?\b|months?\b|free"]),
+    dict(name="BizLens", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "Do you sell BizLens separately?", 0)], expect=[r"Business Sentinel", r"ERP Cloud", r"not sold separately|built into|part of"]),
+    dict(name="Daily Sales Report retired", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "I used the Daily Sales Report before. Can I still get it?", 0)],
+         expect=[r"no longer", r"ERP Cloud"]),
+    dict(name="are you a human", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "Am I talking to a real person or a bot?", 0)], expect=[r"\bAI\b", r"team"],
+         forbid=[r"I(?:'m| am) (?:a )?(?:real )?(?:human|person)"]),
+    dict(name="partnership", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "We would like to partner with Mega-Net and resell your software in Ghana", 0)],
+         expect=[r"Fredrick|team"], forbid=[r"commission|exclusive|agree"]),
     dict(name="changes their mind", lead=dict(product_interest="ehr_cloud", status="engaged", demo_state="accepted"),
          history=[("in", "Yes I want the team demo", 2), ("out", "Great. What is your organisation called?", 1.9),
                   ("in", "Sorry, actually no, I will think about it first", 0)], expect=[r"no problem|of course|understand|fine|sure"]),
@@ -114,12 +144,19 @@ def check_reply(reply, scenario, prior_bot_texts):
         ("latest message addressed", all(re.search(p, reply, re.I | re.S) for p in scenario.get("expect", [r"."]))
          and not any(re.search(p, reply, re.I) for p in scenario.get("forbid", [])), ""),
     ]
+    intros = len(re.findall(knowledge.AI_INTRO_RE, reply))
+    checks.append(("AI disclosure once, never repeated",
+                   intros == (0 if any(re.search(knowledge.AI_INTRO_RE, t) for t in prior_bot_texts) else 1),
+                   f"{intros} introduction(s)"))
+    checks.append(("no phone number, e-mail or website link",
+                   not re.search(r"meganetsoftware|\.com\.ng|\bwww\.|\b0[789]\d{9}\b|\+\d{10,}", reply, re.I), ""))
     if first:
         own = business_facts.video_for(first)[1]
         other = [u for u in business_facts.PRODUCT_DEMO_VIDEOS.values() if u != own]
         urls = re.findall(r"https?://\S+", reply)
         n_questions = re.sub(r"https?://\S+", "", reply).count("?")  # the ?si= in the link is not a question
         body = re.sub(r"https?://\S+", "", reply).replace("flow into the accounting automatically", "")
+        body = body.replace(knowledge.AI_INTRO, "")  # the required AI-disclosure sentence is not a claim about the product
         forbidden = FIRST_REPLY_FORBID.search(body)
         checks += [
             ("uses the customer's name", bool(re.search(r"\bAmaka\b", reply)), ""),

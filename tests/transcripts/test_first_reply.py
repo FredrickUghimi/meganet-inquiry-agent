@@ -35,8 +35,8 @@ def questions(text):
     return re.sub(r"https?://\S+", "", text).count("?")
 
 
-def sent_text(product, name="Amaka", link=True):
-    text = knowledge.first_reply(product, name)
+def sent_text(product, name="Amaka", link=True, disclosed=False):
+    text = knowledge.first_reply(product, name, disclosed)
     return text.replace(knowledge.VIDEO_PLACEHOLDER, LINKS[product]) if link else text
 
 
@@ -46,7 +46,7 @@ def sent_text(product, name="Amaka", link=True):
 def test_approved_reply_features_are_exactly_the_confirmed_ones(product):
     text = knowledge.first_reply(product, "Amaka")
     assert FEATURES[product] in text
-    assert not NEVER.findall(text.replace("flow into the accounting automatically", ""))
+    assert not NEVER.findall(text.replace("flow into the accounting automatically", "").replace(knowledge.AI_INTRO, ""))
     for banned in knowledge.BANNED_PHRASES:
         assert banned not in text.lower()
 
@@ -54,21 +54,25 @@ def test_approved_reply_features_are_exactly_the_confirmed_ones(product):
 @pytest.mark.parametrize("product", ["erp_cloud", "ehr_cloud"])
 def test_approved_reply_name_words_question_video_and_wednesday_offer(product):
     text = sent_text(product, "Amaka Obi")
-    assert text.startswith(f"Hello Amaka! Thank you for your interest in Mega-Net {'ERP' if product == 'erp_cloud' else 'EHR'} Cloud.")
+    assert text.startswith(f"Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Thank you for your interest in "
+                           f"Mega-Net {'ERP' if product == 'erp_cloud' else 'EHR'} Cloud.")
     assert "Obi" not in text and "{" not in text
-    assert len(text.split()) <= knowledge.FIRST_REPLY_MAX_WORDS == 150
+    assert len(text.split()) <= knowledge.FIRST_REPLY_MAX_WORDS == 165
     assert questions(text) == 1 and text.rstrip().endswith("?")
     assert LINKS[product] in text and text.count("http") == 1 and OTHER[product] not in text
     assert "Watch our product demonstration:\n" + LINKS[product] in text
     assert WEDNESDAY in text
-    assert knowledge.first_reply(product, None).startswith("Hello! Thank you")
-    assert knowledge.first_reply(product, "+2348012345678").startswith("Hello! Thank you")  # a bare number is not a name
+    assert knowledge.first_reply(product, None).startswith("Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Thank you")
+    assert knowledge.first_reply(product, "+2348012345678").startswith("Hello! I'm Mega-Net Lead Sentinel")  # a number is not a name
+    # once the bot has introduced itself (for example on the welcome menu) the introduction is not repeated
+    again = knowledge.first_reply(product, "Amaka", disclosed=True)
+    assert again.startswith("Hello Amaka! Thank you for your interest") and "Lead Sentinel" not in again
     assert knowledge.first_reply("unsure", "Amaka") is None
 
 
 def test_the_link_is_never_in_a_template_or_a_prompt(app):
     for text in (knowledge.ERP_FIRST_REPLY, knowledge.EHR_FIRST_REPLY, knowledge.first_reply_brief("erp_cloud", "A"),
-                 knowledge.first_reply_brief("ehr_cloud", "A"), ai._system(Lead(product_interest="erp_cloud"), "x"),
+                 knowledge.first_reply_brief("ehr_cloud", "A"), ai.system_text(ai._system(Lead(product_interest="erp_cloud"), "x")),
                  ai.TURN_SPEC, ai.REPLY_RULES):
         assert "youtu" not in text and "?si=" not in text
     assert knowledge.VIDEO_PLACEHOLDER in knowledge.ERP_FIRST_REPLY and knowledge.VIDEO_PLACEHOLDER in knowledge.first_reply_brief("ehr_cloud")
@@ -84,7 +88,8 @@ def test_the_unconfirmed_template_lines_were_softened():
     erp, ehr = knowledge.first_reply("erp_cloud", "A"), knowledge.first_reply("ehr_cloud", "A")
     for gone in ("project tracking", "scans your business activity", "issues that need attention", "on a computer or phone"):
         assert gone not in erp
-    assert "project costing" in erp and "whenever you run a scan" in erp and "layout that adapts to phones" in erp
+    assert "project costing" in erp and "whenever you run a scan" in erp
+    assert "phone" not in erp.lower() and "runs in a web browser" in erp
     assert "flags unusual billing activity" not in ehr and "flags possible billing problems for you to review" in ehr
     assert "each facility's data stays separate" not in ehr and "each organisation's data stays separate" in ehr
 
@@ -94,11 +99,11 @@ def test_knowledge_summaries_have_verdicts_and_never_claim_lists():
         assert "Customer-safe module summary" in text and "Never claim (NOT BUILT or UNKNOWN)" in text
         assert "CONFIRMED" in text and "PARTLY" in text
     erp, ehr = knowledge.ERP_CLOUD_KNOWLEDGE, knowledge.EHR_CLOUD_KNOWLEDGE
-    for line in ("Project tracking: PARTLY", "Business Sentinel: PARTLY", "Use on a phone: PARTLY",
+    for line in ("Project tracking: PARTLY", "Business Sentinel: PARTLY", "Where it runs: CONFIRMED",
                  "Accounting and financial reports: CONFIRMED", "Sales and purchases flowing into the accounts automatically: CONFIRMED"):
         assert line in erp, line
     for line in ("Patient queues: CONFIRMED", "Online patient booking: CONFIRMED", "NHIS and HMO claims", "Nursing workflows: CONFIRMED",
-                 "Separation of each facility's data: PARTLY", "Use on Android and iPhone browsers: UNKNOWN",
+                 "Separation of each facility's data: PARTLY", "Where it runs: CONFIRMED",
                  "Cloud use with no server: CONFIRMED"):
         assert line in ehr, line
     flat = " ".join(ehr.split())
@@ -115,7 +120,7 @@ def test_first_message_gets_the_approved_reply_with_the_video_inserted_by_code_a
     reply = r[0]
     assert reply == sent_text(product)
     assert reply.count(LINKS[product]) == 1 and OTHER[product] not in reply and "{video_url}" not in reply
-    assert WEDNESDAY in reply and questions(reply) == 1 and reply.rstrip().endswith("?") and len(reply.split()) <= 150
+    assert WEDNESDAY in reply and questions(reply) == 1 and reply.rstrip().endswith("?") and len(reply.split()) <= 165
     assert reply.startswith("Hello Amaka!")
     system = cl.calls[0]["system"]
     assert "APPROVED FIRST REPLY" in system and "youtu" not in system and "{video_url}" in system
@@ -133,7 +138,8 @@ def test_a_name_is_replaced_by_hello_when_unknown(app, sent, cl):
     value["contacts"] = []
     cl.drafts.append(turn(knowledge.first_reply("erp_cloud", None)))
     post(app, value)
-    assert sent[-1][2].startswith("Hello! Thank you for your interest in Mega-Net ERP Cloud.")
+    assert sent[-1][2].startswith(
+        "Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Thank you for your interest in Mega-Net ERP Cloud.")
 
 
 def test_claude_cannot_write_or_change_the_link(chat, cl):
@@ -240,7 +246,7 @@ def test_a_reply_with_banned_words_too_long_or_two_questions_is_regenerated(chat
     assert r == [sent_text("erp_cloud")] and len(cl.calls) == 2
     chat2 = Chat(chat.app, chat.sent, cl, "2348055555555")
     long_reply = good + " " + "Extra words that go on and on. " * 12
-    assert len(long_reply.split()) > 150
+    assert len(long_reply.split()) > knowledge.FIRST_REPLY_MAX_WORDS
     assert chat2.say("Hi, ERP Cloud please", turn(long_reply), turn(good)) == [sent_text("erp_cloud")]
     chat3 = Chat(chat.app, chat.sent, cl, "2348066666666")
     two_q = good.replace("software to solve?", "software to solve? And how many staff do you have?")
@@ -258,14 +264,14 @@ def test_if_claude_keeps_breaking_the_rules_the_approved_text_itself_is_sent_and
 def test_tapping_a_product_button_sends_the_approved_first_reply_with_link_and_state(app, sent, cl):
     cl.classification["product"] = "erp_cloud"
     post(app, text_value(LEAD, mid="wamid.a", body="hi"))
-    cl.drafts.append(knowledge.first_reply("erp_cloud", "Amaka"))  # the tap draft is plain text
+    cl.drafts.append(knowledge.first_reply("erp_cloud", "Amaka", disclosed=True))  # the tap draft is plain text
     inter = text_value(LEAD, mid="wamid.b")
     inter["messages"][0].pop("text")
     inter["messages"][0]["type"] = "interactive"
     inter["messages"][0]["interactive"] = {"type": "button_reply", "button_reply": {"id": "erp_cloud", "title": "ERP Cloud"}}
     post(app, inter)
     db.session.expire_all()
-    assert sent[-1][2] == sent_text("erp_cloud")
+    assert sent[-1][2] == sent_text("erp_cloud", disclosed=True)  # the welcome menu already introduced the AI assistant
     lead = Lead.query.one()
     assert lead.product_interest == "erp_cloud" and lead.demo_state == "asked" and lead.demo_offer_open
     assert service._video_sent_at(lead, ERP_LINK) is not None
@@ -280,8 +286,8 @@ def test_tap_with_claude_down_sends_the_approved_text_itself(app, sent, cl):
     inter["messages"][0]["type"] = "interactive"
     inter["messages"][0]["interactive"] = {"type": "button_reply", "button_reply": {"id": "ehr_cloud", "title": "EHR Cloud"}}
     post(app, inter)
-    assert sent[-1][2] == sent_text("ehr_cloud")
+    assert sent[-1][2] == sent_text("ehr_cloud", disclosed=True)
 
 
 def test_banned_phrases_are_in_the_reply_rules():
-    assert "comprehensive" in ai.REPLY_RULES and "all-in-one" in ai.REPLY_RULES and "150" in ai.REPLY_RULES
+    assert "comprehensive" in ai.REPLY_RULES and "all-in-one" in ai.REPLY_RULES and str(knowledge.FIRST_REPLY_MAX_WORDS) in ai.REPLY_RULES
