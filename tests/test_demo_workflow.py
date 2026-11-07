@@ -59,8 +59,9 @@ def test_demo_rules_constants():
     assert demo.duration() == 30 and demo.notice_hours() == 2
 
 
-def test_only_the_three_undefined_partnership_facts_are_still_todo():
-    assert business_facts.todo_names() == ["PARTNERSHIP_ELIGIBLE_PAYMENT", "PARTNERSHIP_PAYOUT_TERMS", "PARTNERSHIP_TRACKING"]
+def test_only_the_six_undefined_partnership_facts_are_still_todo():
+    assert business_facts.todo_names() == ["PARTNERSHIP_TRACKING", "PARTNERSHIP_PAYOUT_TIMING", "PARTNERSHIP_PAYOUT_METHOD",
+                                           "PARTNERSHIP_REFUNDS", "PARTNERSHIP_TAX_AND_DISCOUNTS", "PARTNERSHIP_CREDIT_RULES"]
     assert not [n for n, _ in business_facts.FACTS if business_facts.is_todo(n)]  # every operational fact is filled in
 
 

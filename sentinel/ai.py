@@ -493,9 +493,10 @@ SITUATIONS = {
         "name, state the filled-in partnership facts in your own words, say Fredrick or a member of the team confirms the "
         "full terms and onboards partners personally, and ask ONE short question: who they are and which organisations they "
         "could introduce. Say the team will reply personally at the next business time from the office-hours status. For any "
-        "fact marked UNKNOWN say the team confirms it personally. Never promise acceptance, eligibility, a payout, a date or "
-        "any amount, and never work out a commission for a product or sale. If they say someone referred them, say only that "
-        "the team will note it."
+        "fact marked UNKNOWN (payout timing or method, refunds, tax and discounts, credit rules, tracking) say the team confirms "
+        "it personally. If asked about renewals or later payments, say the commission is paid once and renewals earn nothing. "
+        "Never promise acceptance or eligibility, never confirm a person or a sale, and never work out a commission for any "
+        "product or customer. If they say someone referred them, say only that the team will note it."
     ),
     "holding": (
         "A person (Fredrick or the team) is handling this conversation. Acknowledge the customer's latest message in one "
@@ -701,12 +702,79 @@ _SAYS_TEAM_RE = re.compile(r"\b(team|Fredrick|colleague|someone|member of)\b", r
 _CONTACT_RE = re.compile(r"meganetsoftware|\.com\.ng\b", re.I)  # the company's own site or e-mail domain is never given out
 # promises the bot must never make about the referral partnership programme (partnership topic, or a lead with a referrer)
 _PARTNER_PROMISE_RE = re.compile(
-    r"\byou(?:'ll|\s+will|\s+are\s+going\s+to)\s+(?:be\s+(?:accepted|approved|eligible|a\s+partner|paid)|earn|get\s+paid)\b|"
+    r"\byou(?:'ll|\s+will|\s+are\s+going\s+to)\s+(?:be\s+(?:accepted|approved|eligible|a\s+partner|paid)|get\s+paid)\b|"
     r"\b(?:you\s+are|you're)\s+(?:now\s+)?(?:accepted|approved|eligible|a\s+partner|in\s+the\s+programme)\b|"
     r"\bguarantee[sd]?\b[^.?!]{0,40}\b(?:commission|payout|payment)\b|"
-    r"\b(?:commission|payouts?)\s+(?:is|will\s+be|are)\s+(?:paid|due|owed|yours)\b|"
+    r"\b(?:commission|payouts?)\s+(?:is|will\s+be|are)\s+(?:due|owed|yours|paid\s+(?:within|after|every|monthly|weekly|daily|by|on\s+the|via|through|into|to\s+your|in\s+cash))\b|"
     r"\b(?:referral|sale)\s+(?:is|has\s+been|was)\s+(?:valid|confirmed|accepted|approved|eligible)\b|"
     r"\b\d+(?:\.\d+)?\s*%\s+of\s+(?:the\s+)?(?:price|sale|subscription|ERP|EHR|\w+\s+Cloud)\b", re.I)
+# A positive claim that renewals or later payments earn commission. A sentence that denies it ("no recurring payments",
+# "renewals earn nothing") is fine, so sentences with a negation are skipped.
+_RECURRING_CLAIM_RE = re.compile(
+    r"\b(?:earn|earns|get|gets|receive|receives|paid|pay|payable)\b[^.?!]{0,50}\b(?:renewals?|recurring|later\s+payments?|"
+    r"every\s+(?:payment|month|year|renewal)|each\s+(?:payment|month|year|renewal)|monthly)\b|"
+    r"\b(?:renewals?|recurring|later\s+payments?)\b[^.?!]{0,30}\b(?:also\s+)?(?:earn|count|qualify|pay|are\s+paid)\b", re.I)
+_NEGATION_RE = re.compile(r"\b(?:no|not|never|nothing|none|isn't|aren't|doesn't|don't|won't|cannot|can't|without|only)\b|n't", re.I)
+# The retired report: "no longer offered", then point to ERP Cloud. Never "you won't be able to get it".
+_CANNOT_GET_RE = re.compile(r"\b(?:won't|will\s+not|can't|cannot|unable\s+to|not\s+able\s+to)\s+(?:be\s+able\s+to\s+)?(?:get|buy|have|obtain|access|use)\b",
+                            re.I)
+_RETIRED_REPORT_RE = re.compile(r"daily\s+sales", re.I)
+
+
+# Terms of the partnership programme that are still TODO in business_facts.py. A draft that states one of them as fact is
+# making it up; the bot says the team confirms it personally. Sentences with a negation or a hand-over are not claims.
+_UNDEFINED_TERM_RES = (
+    ("PARTNERSHIP_PAYOUT_TIMING", re.compile(r"\bwithin\s+\d+\s+(?:hours?|days?|weeks?|months?)\b|\b(?:same|next)\s+day\b|"
+                                              r"\bend\s+of\s+(?:the\s+)?(?:week|month)\b|\b(?:weekly|monthly|fortnightly)\b", re.I)),
+    ("PARTNERSHIP_PAYOUT_METHOD", re.compile(r"\b(?:bank\s+transfer|wire|cash|mobile\s+money|paystack|flutterwave|wallet|cheque|"
+                                              r"direct\s+deposit|into\s+your\s+(?:bank\s+)?account)\b", re.I)),
+    ("PARTNERSHIP_REFUNDS", re.compile(r"\brefund\w*[^.?!]{0,60}\b(?:commission|deduct\w*|claw\w*|forfeit\w*|lose|reversed)\b|"
+                                        r"\b(?:commission|deduct\w*|claw\w*)\b[^.?!]{0,60}\brefund\w*", re.I)),
+    ("PARTNERSHIP_TAX_AND_DISCOUNTS", re.compile(r"\b(?:before|after|net\s+of|excluding|including)\s+(?:tax|vat|discounts?)\b|"
+                                                  r"\btax[- ]?(?:inclusive|exclusive)\b", re.I)),
+    ("PARTNERSHIP_CREDIT_RULES", re.compile(r"\b(?:first|earliest)\s+(?:person\s+)?(?:to\s+)?(?:claim|register|refer|introduce)\w*|"
+                                             r"\bcredit\b[^.?!]{0,40}\b(?:goes\s+to|given\s+to|shared|split)\b", re.I)),
+)
+_HAND_OVER_RE = re.compile(r"\b(?:team|Fredrick|confirm\w*|whether|depends?)\b", re.I)
+_ELIGIBILITY_CLAIM_RE = re.compile(
+    r"\b(?:qualif(?:y|ies|ied)|is\s+eligible|are\s+eligible|counts?\s+as\s+(?:a\s+)?(?:valid\s+)?referral)\b|"
+    r"\byou(?:'ll|\s+will)\s+(?:get|receive)\s+(?:your|the)\s+(?:20%|commission)\b", re.I)
+
+
+def undefined_terms(text):
+    """Names of partnership facts that are still TODO but that `text` states as fact (a payout time, a method, a refund
+    rule, tax treatment, credit rule). A sentence that denies or hands over to the team is not a claim."""
+    found = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+        if _NEGATION_RE.search(sentence) or _HAND_OVER_RE.search(sentence):
+            continue
+        for name, rx in _UNDEFINED_TERM_RES:
+            if business_facts.is_todo(name) and rx.search(sentence) and name not in found:
+                found.append(name)
+    return found
+
+
+def confirms_eligibility(text):
+    """True if a sentence tells someone a person or sale qualifies, is eligible or will earn their commission, without
+    handing it to the team. Only the team confirms eligibility."""
+    return any(_ELIGIBILITY_CLAIM_RE.search(sn) and not (_HAND_OVER_RE.search(sn) or _NEGATION_RE.search(sn))
+               for sn in re.split(r"(?<=[.!?])\s+", text or ""))
+
+
+def claims_recurring(text):
+    """True if a sentence says renewals or later payments earn commission (a sentence with a negation is a denial)."""
+    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+        if _RECURRING_CLAIM_RE.search(sentence) and not _NEGATION_RE.search(sentence):
+            return True
+    return False
+
+
+def strip_intro(text):
+    """The reply without the one-time AI-disclosure opener ('Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI
+    assistant.'), for checks that must read what the reply says about the customer's question."""
+    return _INTRO_SENTENCE_RE.sub("", text or "", count=1).strip()
+
+
 _COMPANY_INTRO_RE = re.compile(r"Mega-Net Software is a Nigerian software", re.I)
 _GREET_RE = re.compile(r"^\s*(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b[^.!?\n]{0,40}[!.,]\s*", re.I)
 
@@ -847,7 +915,8 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
     model = current_app.config["ANTHROPIC_MODEL"]
     nonlocal_fixed = [fallback_text or FALLBACK_REPLIES[situation]]
     intro_needed = not ai_disclosed(messages)  # the very first bot message of the conversation says it is an AI
-    asked_ai = asks_if_ai(" ".join(pending_inbound(messages)))
+    asked_now = " ".join(pending_inbound(messages))  # what the customer wrote since the bot last spoke
+    asked_ai = asks_if_ai(asked_now)
     name = getattr(lead, "name", None)
     # numbers the customer wrote themselves (and their own WhatsApp number) may be repeated back; no others
     customer_numbers = [getattr(lead, "phone", None)] + [n for m in messages if m.direction == "inbound"
@@ -899,6 +968,22 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             problems.append(("promise", "Your last attempt promised or confirmed something about the partnership programme "
                                         "(acceptance, eligibility, a payout, a valid referral, or a commission amount). "
                                         "Only the team can; say the team confirms the details personally."))
+        if partner_context and claims_recurring(text):
+            problems.append(("recurring", "Your last attempt said renewals or later payments earn commission. The commission is "
+                                          "paid once, on the initial total cost, with no recurring payments: renewals and later "
+                                          "payments earn nothing."))
+        if partner_context and confirms_eligibility(text):
+            problems.append(("eligibility", "Your last attempt told someone a person or sale qualifies or is eligible. Only the "
+                                            "team confirms eligibility; say the team will confirm it personally."))
+        if partner_context and undefined_terms(text):
+            problems.append(("undefined_terms", "Your last attempt stated a partnership term that has not been decided ("
+                                                + ", ".join(t.replace("PARTNERSHIP_", "").replace("_", " ").lower()
+                                                            for t in undefined_terms(text))
+                                                + "). For anything not in the partnership facts say the team confirms it "
+                                                  "personally."))
+        if _RETIRED_REPORT_RE.search(asked_now) and _CANNOT_GET_RE.search(text):
+            problems.append(("retired_wording", "Do not tell the customer they cannot get it. Say it is no longer offered, then "
+                                                "point to Mega-Net ERP Cloud as the current business management product."))
         if foreign_numbers(text, customer_numbers):
             problems.append(("phone", "Your last attempt contained a phone number that is not the official WhatsApp number. "
                                       "Remove every other number. Give only the official WhatsApp number from the business "

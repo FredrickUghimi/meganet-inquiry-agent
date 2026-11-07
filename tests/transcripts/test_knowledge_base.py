@@ -277,7 +277,9 @@ def test_bizlens_and_the_daily_sales_report_answers_are_in_the_core_for_every_to
                 "such as cash movements not tied to a transaction, or credit sales with no invoice or receipt. It isn't "
                 "sold separately.") in system
         assert "ERP Cloud for a business or EHR Cloud for a clinic or hospital" in system
-        assert "is no longer offered; say so, and that Mega-Net ERP Cloud is the current business management product" in system
+        assert ("is no longer offered; say that, then point to Mega-Net ERP Cloud as the current business management product"
+                in system)
+        assert "won't be able to get it" not in system
 
 
 def test_a_bizlens_or_daily_sales_report_question_is_answered_by_claude_not_a_fixed_text(chat, cl):

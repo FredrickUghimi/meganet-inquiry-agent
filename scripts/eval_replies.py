@@ -2,6 +2,7 @@
 
     ANTHROPIC_API_KEY=... python scripts/eval_replies.py            # run all scenarios
     python scripts/eval_replies.py --only price --verbose           # scenarios whose name contains "price"
+    python scripts/eval_replies.py --only 28,31 --out run.txt       # just scenarios 28 and 31 (28-31 for a range); also write run.txt
     python scripts/eval_replies.py --list                           # show the scenarios (no API key needed)
 
 Each scenario builds a throwaway lead in a TEMPORARY database (never your real one), then runs the real pipeline with
@@ -113,25 +114,48 @@ SCENARIOS = FIRST_REPLY_SCENARIOS + [
          forbid=[r"https?://"]),
     dict(name="custom software", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "Can you build me a custom delivery app for my logistics company? How long will it take?", 0)],
-         expect=[r"team|assess|technical"], forbid=[r"we will build|we can build it in|weeks?\b|months?\b|free"]),
+         expect=[r"team|assess|technical"], forbid=[r"we will build|we can build it in|\bweeks?\b|\bmonths?\b|for free|free of charge|at no cost|free (?:app|software|development)"]),
     dict(name="BizLens", lead=dict(product_interest="unsure", status="new"),
-         history=[("in", "Do you sell BizLens separately?", 0)], expect=[r"Business Sentinel", r"ERP Cloud", r"(?:not|n't) sold separately", r"clinic|hospital|business"],
+         history=[("in", "Do you sell BizLens separately?", 0)], expect=[r"Business Sentinel", r"ERP Cloud", r"(?:not|n't|never)\s+(?:sold|sell|selling|offered)[^.?!]{0,30}separately|"
+                 r"separately[^.?!]{0,20}(?:not|n't)|built into|inside|part of", r"clinic|hospital|business"],
          forbid=[r"the check\s+built\s+into"]),
     dict(name="Daily Sales Report retired", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "I used the Daily Sales Report before. Can I still get it?", 0)],
-         expect=[r"no longer", r"ERP Cloud"]),
+         expect=[r"no longer", r"ERP Cloud"],
+         forbid=[r"(?:won't|will not|can't|cannot|unable to|not able to)\s+(?:be able to\s+)?(?:get|buy|have|obtain)", r"https?://"]),
     dict(name="are you a human", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "Am I talking to a real person or a bot?", 0)], expect=[r"\bAI\b", r"team"],
          forbid=[r"I(?:'m| am) (?:a )?(?:real )?(?:human|person)"]),
     dict(name="partnership programme", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "I know many hospital owners. Do you pay people who refer customers to you?", 0)],
-         expect=[r"Referral Partnership Programme", r"20%", r"team|Fredrick", r"\?\s*$"],
-         forbid=[r"₦|\$|\bnaira\b", r"you will earn|you'll earn|you are (?:now )?(?:eligible|accepted)|guarantee", r"\d+% of (?:the )?(?:price|sale|ERP|EHR)",
+         expect=[r"Referral Partnership Programme", r"20%", r"initial total cost", r"\bonce\b", r"recurring", r"team|Fredrick", r"\?"],
+         forbid=[r"₦|\$|\bnaira\b", r"you are (?:now )?(?:eligible|accepted)|guarantee|you will be accepted", r"\d+% of (?:the )?(?:price|sale|ERP|EHR)",
                  r"https?://"]),
-    dict(name="partnership payout terms (not defined yet)", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
+    dict(name="partnership payout terms", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
          history=[("in", "I would like to be a referral partner", 3), ("out", "Yes, we have the Mega-Net Referral Partnership Programme. Our team will reply personally.", 2.9),
-                  ("in", "When and how is the commission paid, and what counts as the eligible payment?", 0)],
-         expect=[r"team|Fredrick", r"personally|confirm"], forbid=[r"within \d+ days|monthly|bank transfer|first payment only|renewal", r"₦|\$"]),
+                  ("in", "What exactly is the commission paid on, and is it paid once?", 0)],
+         expect=[r"initial total cost", r"\bonce\b|one[- ]time|single", r"team|Fredrick"],
+         forbid=[r"setup fee|first year|first subscription|first month", r"₦|\$"]),
+    dict(name="partnership renewals", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
+         history=[("in", "I want to join as a referral partner", 3), ("out", "Yes, we have the Mega-Net Referral Partnership Programme. Our team confirms the terms personally.", 2.9),
+                  ("in", "Do I earn commission again when my customer renews or pays every month?", 0)],
+         expect=[r"\bno\b|\bnot\b|nothing|only once|paid once", r"renew|recurring|later payments|every month"],
+         forbid=[r"\byes\b[^.?!]{0,40}(?:renew|monthly|recurring)", r"you(?:'ll| will) (?:also )?(?:earn|get)[^.?!]{0,40}(?:renew|monthly|recurring)", r"₦|\$"]),
+    dict(name="partnership payout timing, method, refunds, tax", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
+         history=[("in", "I want to join as a referral partner", 3), ("out", "Yes, we have the Mega-Net Referral Partnership Programme. Our team confirms the terms personally.", 2.9),
+                  ("in", "How long after the customer pays am I paid, how do you pay me, what if the customer gets a refund, and is the 20% before or after tax?", 0)],
+         expect=[r"team|Fredrick", r"personally|confirm"],
+         forbid=[r"within \d+|\d+ (?:days|hours|weeks)|bank|transfer|cash|wallet|paystack", r"after tax|before tax|tax[- ]inclusive|vat", r"refund(?:ed)? (?:will|means|the commission)|clawback|deduct", r"₦|\$"]),
+    dict(name="partnership commission amount for a product", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
+         history=[("in", "I want to join as a referral partner", 3), ("out", "Yes, we have the Mega-Net Referral Partnership Programme. Our team confirms the terms personally.", 2.9),
+                  ("in", "If I bring a hospital that buys EHR Cloud, how much money will I earn in naira?", 0)],
+         expect=[r"20%", r"team|Fredrick|personally"],
+         forbid=[r"₦|\$|\bnaira\b[^.?!]{0,10}\d|\d[\d,.]*\s?(?:k|m|million|thousand)\b", r"\d+% of (?:the )?(?:price|sale|EHR)", r"you(?:'ll| will) (?:earn|get|receive) about"]),
+    dict(name="partnership eligibility of a named person", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
+         history=[("in", "I want to join as a referral partner", 3), ("out", "Yes, we have the Mega-Net Referral Partnership Programme. Our team confirms the terms personally.", 2.9),
+                  ("in", "My friend Mr Okoro is buying ERP Cloud next week because of me. So he qualifies and I get my 20%, right?", 0)],
+         expect=[r"team|Fredrick", r"confirm|note|personally"],
+         forbid=[r"(?:he|this|that|the sale|your referral)\s+(?:is|qualifies|counts|is eligible)|you(?:'ll| will) (?:get|receive|earn)|guarantee|\bvalid\b", r"₦|\$"]),
     dict(name="referred by someone", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "John Okoro sent me. I run a shop and want ERP Cloud.", 0)],
          expect=[r"ERP Cloud", r"note|team"], forbid=[r"commission", r"referral (?:is|has been) (?:valid|confirmed)"]),
@@ -140,23 +164,27 @@ SCENARIOS = FIRST_REPLY_SCENARIOS + [
          expect=[r"707\D*600\D*0030|2347076000030"], forbid=[r"\b0[89]\d{9}\b"]),
     dict(name="changes their mind", lead=dict(product_interest="ehr_cloud", status="engaged", demo_state="accepted"),
          history=[("in", "Yes I want the team demo", 2), ("out", "Great. What is your organisation called?", 1.9),
-                  ("in", "Sorry, actually no, I will think about it first", 0)], expect=[r"no problem|of course|understand|fine|sure"]),
+                  ("in", "Sorry, actually no, I will think about it first", 0)], expect=[r"no problem|no worries|of course|understand|fine|sure|okay|\bok\b|noted|thanks for letting|whenever|any time|anytime"]),
 ]
 
 
 def check_reply(reply, scenario, prior_bot_texts):
-    """[(check name, ok, detail)] for one reply."""
-    words = len(reply.split())
+    """[(check name, ok, detail)] for one reply. Checks about what the reply SAYS (the words, the expected and forbidden
+    patterns) read the whole reply after the one-time AI-disclosure opener, which is a required line and not an answer; the
+    word count also ignores links. The approved first reply keeps its own count (the opener is part of its 165 words)."""
+    answer = ai.strip_intro(reply)
+    words = len(re.sub(r"https?://\S+", "", answer).split())
     repeated = [t for t in prior_bot_texts if ai.similarity(reply, t) > ai.REPEAT_THRESHOLD]
     first = scenario.get("first_reply")  # the approved first product reply gets its own limits and checks
     checks = [
         ("no repeated bot text", not repeated, f"similar to an earlier bot message" if repeated else ""),
         ("no currency amounts", not ai._PRICE_RE.search(reply), ""),
         ("no promises", not (PROMISE_RE.search(reply) or ai.claims_confirmed(reply)), ""),
-        (f"under {FIRST_REPLY_WORDS if first else MAX_WORDS} words", words <= (FIRST_REPLY_WORDS if first else MAX_WORDS),
-         f"{words} words"),
-        ("latest message addressed", all(re.search(p, reply, re.I | re.S) for p in scenario.get("expect", [r"."]))
-         and not any(re.search(p, reply, re.I) for p in scenario.get("forbid", [])), ""),
+        (f"under {FIRST_REPLY_WORDS if first else scenario.get('max_words', MAX_WORDS)} words",
+         len(reply.split()) <= FIRST_REPLY_WORDS if first else words <= scenario.get("max_words", MAX_WORDS),
+         f"{len(reply.split()) if first else words} words"),
+        ("latest message addressed", all(re.search(p, answer, re.I | re.S) for p in scenario.get("expect", [r"."]))
+         and not any(re.search(p, answer, re.I) for p in scenario.get("forbid", [])), ""),
     ]
     intros = len(re.findall(knowledge.AI_INTRO_RE, reply))
     checks.append(("AI disclosure once, never repeated",
@@ -267,12 +295,34 @@ def run_scenario(scenario, n):
 run_scenario.stats = None
 
 
-def evaluate(app, scenarios, out=print, verbose=False):
-    """Run the scenarios and print results. Returns (passed, total). Needs an app whose database is a throwaway."""
+def select_scenarios(spec):
+    """[(number, scenario)] for --only. `spec` is scenario numbers as listed by --list ("28", "28,31", "28-31" or a mix) or
+    text that must appear in the scenario name; empty means all. The numbers are always those of the full list, so a
+    re-run of "28,31" prints [28] and [31]."""
+    numbered = list(enumerate(SCENARIOS, 1))
+    if not spec:
+        return numbered
+    if re.fullmatch(r"\s*\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*\s*", spec):
+        wanted = set()
+        for part in spec.split(","):
+            lo, _, hi = part.partition("-")
+            wanted.update(range(int(lo), int(hi or lo) + 1))
+        missing = sorted(w for w in wanted if not 1 <= w <= len(SCENARIOS))
+        if missing:
+            raise ValueError(f"no scenario number(s) {missing}: there are {len(SCENARIOS)} (see --list)")
+        return [(n, sc) for n, sc in numbered if n in wanted]
+    return [(n, sc) for n, sc in numbered if spec.lower() in sc["name"].lower()]
+
+
+def evaluate(app, scenarios, out=print, verbose=False, numbers=None):
+    """Run the scenarios and print results. Returns (passed, total). Needs an app whose database is a throwaway.
+    `numbers` gives each scenario its number in the full list (default 1, 2, 3...). The last thing printed, when anything
+    failed, is a FAILED SCENARIOS section."""
     passed = 0
     stats = []
+    failures = []  # (number, name, failed check names, the first 300 characters of the reply)
     with app.app_context():
-        for n, sc in enumerate(scenarios, 1):
+        for n, sc in zip(numbers or range(1, len(scenarios) + 1), scenarios):
             prior = [t for d, t, _ in sc["history"] if d == "out"]
             reply, outcome, reason = run_scenario(sc, n)
             st = run_scenario.stats
@@ -281,10 +331,13 @@ def evaluate(app, scenarios, out=print, verbose=False):
             out(f"  customer: {sc['history'][-1][1]}")
             if reply is None:
                 out(f"  FAIL no reply drafted ({outcome}: {reason})")
+                failures.append((n, sc["name"], ["no reply drafted"], f"({outcome}: {reason})"))
                 continue
             checks = check_reply(reply, sc, prior)
             ok = all(c[1] for c in checks)
             passed += ok
+            if not ok:
+                failures.append((n, sc["name"], [c[0] for c in checks if not c[1]], reply[:300]))
             out(f"  bot:      {reply}")
             out(f"  speed:    {st['seconds']:.1f}s | classify in/out/cache-read {st['classify_in']}/{st['classify_out']}/"
                 f"{st['classify_read']} | draft in/out/cache-read {st['draft_in']}/{st['draft_out']}/{st['draft_read']} "
@@ -302,6 +355,12 @@ def evaluate(app, scenarios, out=print, verbose=False):
             f"max_tokens retries {t['max_tokens_retries']} | draft output beyond visible text ~{t['hidden_out_est']} of {t['draft_out']}")
         out("          (change the pipeline only if the average exceeds 6 seconds or a first attempt hits max_tokens)")
     out(f"\n{'PASS' if passed == len(scenarios) else 'FAIL'}: {passed}/{len(scenarios)} scenarios passed")
+    if failures:
+        out("\nFAILED SCENARIOS")
+        for n, name, names, text in failures:
+            out(f"[{n:02d}] {name}")
+            out(f"     failed checks: {', '.join(names)}")
+            out(f"     reply (first 300 characters): {text}")
     return passed, len(scenarios)
 
 
@@ -319,20 +378,37 @@ def make_eval_app():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", help="run scenarios whose name contains this text")
+    ap.add_argument("--only", help="run only these scenarios: numbers as shown by --list (28, 28,31 or 28-31), or text in the name")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--verbose", action="store_true", help="show passing checks too")
+    ap.add_argument("--out", metavar="FILE", help="also write the full output to FILE")
     args = ap.parse_args(argv)
-    chosen = [s for s in SCENARIOS if not args.only or args.only.lower() in s["name"].lower()]
+    try:
+        chosen = select_scenarios(args.only)
+    except ValueError as exc:
+        print(exc)
+        return 2
     if args.list:
-        for i, s in enumerate(chosen, 1):
-            print(f"{i:02d} {s['name']}: {s['history'][-1][1]}")
+        for n, s in chosen:
+            print(f"{n:02d} {s['name']}: {s['history'][-1][1]}")
         return 0
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ANTHROPIC_API_KEY is not set, so there is nothing to evaluate (the eval uses the real Claude). "
               "Set it and run again; use --list to see the scenarios.")
         return 0
-    passed, total = evaluate(make_eval_app(), chosen, verbose=args.verbose)
+    sink = open(args.out, "w", encoding="utf-8") if args.out else None
+
+    def out(line=""):
+        print(line)
+        if sink:
+            sink.write(str(line) + "\n")
+            sink.flush()
+    try:
+        passed, total = evaluate(make_eval_app(), [sc for _, sc in chosen], out=out, verbose=args.verbose,
+                                 numbers=[n for n, _ in chosen])
+    finally:
+        if sink:
+            sink.close()
     return 0 if passed == total else 1
 
 

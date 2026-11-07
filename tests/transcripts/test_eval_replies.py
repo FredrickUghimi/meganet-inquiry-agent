@@ -55,7 +55,8 @@ def test_evaluate_runs_the_real_pipeline_in_dry_run_and_sends_and_stores_nothing
     passed, total = ev.evaluate(eval_app, ev.SCENARIOS, out=lines.append)
     text = "\n".join(lines)
     assert total == len(ev.SCENARIOS) and passed < total  # a generic reply cannot satisfy every scenario
-    assert "FAIL: " in lines[-1] and "scenarios passed" in lines[-1]
+    summary = next(l for l in lines if "scenarios passed" in l)
+    assert "FAIL: " in summary and lines[-1].startswith("     reply (first 300 characters)")  # FAILED SCENARIOS is last
     assert len(cl.calls) == total  # Claude (mocked) was called once per scenario, for real, through the pipeline
     assert sent == [] and Lead.query.count() == real_leads  # nothing sent, nothing stored in the app's database
     idx = [i for i, s in enumerate(ev.SCENARIOS, 1) if s["name"].startswith("thanks plus price")][0]

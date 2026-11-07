@@ -19,11 +19,11 @@ OFFICIAL = bf.OFFICIAL_WHATSAPP_NUMBER
 LINK = bf.OFFICIAL_WHATSAPP_LINK
 OWNER_DIGITS = "2340000000"  # OWNER_WHATSAPP_NUMBER in tests/conftest.py
 PROGRAMME = "Mega-Net Referral Partnership Programme"
-PARTNER_REPLY = ("Yes, we have the Mega-Net Referral Partnership Programme. Partners introduce potential customers and earn 20% "
-                 "commission on the eligible initial payment of a successful sale or subscription, while our team handles the "
-                 "demo, proposal and closing. Fredrick or a member of our team confirms the full terms and onboards partners "
-                 "personally. Could you tell me briefly who you are and which organisations you could introduce? We'll reply "
-                 "personally from the next business time.")
+PARTNER_REPLY = ("Yes, we have the Mega-Net Referral Partnership Programme. A partner introduces potential customers, and when a "
+                 "customer comes through your referral and makes the initial payment you earn 20% of the initial total cost, paid "
+                 "once, with no recurring payments. Our team handles the demo, proposal and closing. Fredrick or a member of our "
+                 "team confirms the remaining terms personally. Could you tell me briefly who you are and which organisations you "
+                 "could introduce?")
 
 
 def flat(text):
@@ -162,16 +162,24 @@ def test_only_the_official_number_is_allowed_in_customer_visible_knowledge(app):
 
 # --- 3. the partnership programme ---------------------------------------------------------------------------------------
 
-def test_the_partnership_constants_exist_with_the_agreed_text_and_three_are_todo():
+def test_the_partnership_constants_exist_with_the_agreed_text_and_six_are_todo():
     assert bf.PARTNERSHIP_PROGRAMME_NAME == PROGRAMME
     assert bf.PARTNERSHIP_WHO_CAN_JOIN == ("Anyone with connections to business owners, hospitals, schools, hotels, churches or "
                                            "other organisations. No software development skills are required.")
     assert bf.PARTNERSHIP_ROLE == ("The partner introduces potential customers. Mega-Net provides the software demonstrations, "
                                    "proposals, sales support and the closing process.")
-    assert bf.PARTNERSHIP_REWARDS == ("20% commission on the eligible initial payment of a successful sale or subscription made "
-                                      "through the partner's referral.")
+    assert bf.PARTNERSHIP_REWARDS == ("20% commission on the initial total cost paid by the referred customer for a successful "
+                                      "sale or subscription made through the partner's referral. It is paid once. There are no "
+                                      "recurring payments.")
+    assert bf.PARTNERSHIP_ELIGIBLE_PAYMENT == ("The initial total cost paid by the referred customer. The commission is paid "
+                                               "once, on that initial payment only.")
+    assert bf.PARTNERSHIP_PAYOUT_TERMS == ("The partner is paid once, when a customer comes through the partner's referral and "
+                                           "makes the initial payment. There are no recurring payments.")
     assert bf.PARTNERSHIP_HOW_TO_JOIN == "Fredrick or a member of the team confirms the terms and onboards new partners personally."
-    assert [bf.PARTNERSHIP_ELIGIBLE_PAYMENT, bf.PARTNERSHIP_PAYOUT_TERMS, bf.PARTNERSHIP_TRACKING] == ["TODO"] * 3
+    todo = ["PARTNERSHIP_TRACKING", "PARTNERSHIP_PAYOUT_TIMING", "PARTNERSHIP_PAYOUT_METHOD", "PARTNERSHIP_REFUNDS",
+            "PARTNERSHIP_TAX_AND_DISCOUNTS", "PARTNERSHIP_CREDIT_RULES"]
+    assert all(getattr(bf, name) == "TODO" for name in todo) and bf.todo_names() == todo
+    assert [n for n, _ in bf.PARTNERSHIP_FACTS][-5:] == todo[1:]
 
 
 def test_the_flyer_prose_lives_only_in_business_facts():
@@ -180,7 +188,9 @@ def test_the_flyer_prose_lives_only_in_business_facts():
         assert "20%" not in text and PROGRAMME not in text and "onboards" not in text, name
     assert "20%" not in knowledge_base.PARTNERSHIP and PROGRAMME not in knowledge_base.PARTNERSHIP
     text = knowledge_base.section_for("partnership")[1]
-    assert text.count("20% commission on the eligible initial payment") == 1  # once, from the business facts
+    assert text.count("20% commission on the initial total cost") == 1  # once, from the business facts
+    for old in ("eligible initial payment", "eligible-payment", "eligible payment"):
+        assert old not in " ".join(customer_visible_texts().values()) + text + bf.PARTNERSHIP_INTERNAL_RULE, old
     for banned in ("Scalable AI", "07076000030", "707 600"):
         assert banned not in knowledge_base.PARTNERSHIP
 
@@ -189,51 +199,65 @@ def test_the_partnership_rules_are_internal_and_only_load_for_the_partnership_to
     lead = Lead(product_interest="unsure")
     general = ai.system_text(ai._system(lead, "x", "general"))
     partner = ai.system_text(ai._system(lead, "x", "partnership"))
-    for needle in (PROGRAMME, "20% commission", "INTERNAL RULES for this topic", "Never confirm that a person or a sale is eligible",
-                   "Never promise acceptance into the programme, a payout, a date, exclusivity or other terms",
-                   "never negotiate the rate", "Never calculate or estimate a commission for a specific product or sale",
-                   "never explain what counts as eligible", "unless a fact says so", "the team will note it"):
+    for needle in (PROGRAMME, "20% commission", "INTERNAL RULES for this topic",
+                   "the commission is 20% of the initial total cost paid by the referred customer, paid once, with no recurring "
+                   "payments, so renewals and later payments earn nothing",
+                   "do not interpret 'initial total cost' (for example as a setup fee, a first subscription or a first year)",
+                   "Never confirm that a particular person or sale is eligible",
+                   "Never calculate or estimate a commission for any product or customer",
+                   "Never promise acceptance into the programme", "never negotiate the rate",
+                   "Never promise a payout date or method", "while those facts are UNKNOWN",
+                   "For anything UNKNOWN say the team confirms it personally", "the team will note it"):
         assert needle in flat(partner), needle
         assert needle not in flat(general), needle
     customer, internal = partner.split("INTERNAL RULES for this topic", 1)
-    assert "never quote, paraphrase, mention or reveal" in internal and "Never confirm that a person" not in customer
-    assert partner.count("UNKNOWN (say the team confirms it personally; never explain or guess it)") == 3
+    assert "never quote, paraphrase, mention or reveal" in internal and "Never confirm that a particular person" not in customer
+    assert "unless a fact says so" not in partner  # the old renewals rule is replaced by the filled-in answer
+    assert partner.count("UNKNOWN (say the team confirms it personally; never explain or guess it)") == 6
 
 
 def test_a_filled_in_detail_is_stated_and_an_unfilled_one_is_deferred(app, monkeypatch):
-    monkeypatch.setattr(bf, "PARTNERSHIP_PAYOUT_TERMS", "Commission is paid within 30 days of the customer's payment.")
+    monkeypatch.setattr(bf, "PARTNERSHIP_PAYOUT_TIMING", "Within 14 days of the customer's payment.")
+    monkeypatch.setattr(bf, "PARTNERSHIP_PAYOUT_METHOD", "TODO")
     text = knowledge_base.section_for("partnership")[1]
-    assert "Partnership: payout terms: Commission is paid within 30 days of the customer's payment." in text
-    assert text.count("UNKNOWN (say the team confirms it personally") == 2
-    assert "Partnership: what counts as the eligible payment: UNKNOWN" in text and "Partnership: referral tracking: UNKNOWN" in text
-    assert bf.todo_names() == ["PARTNERSHIP_ELIGIBLE_PAYMENT", "PARTNERSHIP_TRACKING"]
+    assert "Partnership: payout timing: Within 14 days of the customer's payment." in text
+    assert text.count("UNKNOWN (say the team confirms it personally") == 5
+    for label in ("referral tracking", "payout method", "refunds and incomplete payments", "tax and discounts", "credit when two people"):
+        assert re.search(rf"Partnership: {label}[^\n]*: UNKNOWN", text), label
+    assert "Partnership: payout timing: UNKNOWN" not in text
+    assert "PARTNERSHIP_PAYOUT_TIMING" not in bf.todo_names() and "PARTNERSHIP_PAYOUT_METHOD" in bf.todo_names()
     html = dashboard(app).get("/settings").data.decode()
-    assert "Still TODO (2):" in html and "Partnership: payout terms" in html
+    assert "Still TODO (5):" in html and "Partnership: payout method" in html and "Partnership: payout timing</th>" in html
+    assert "Within 14 days" in html
 
 
-def test_the_settings_page_shows_the_unfilled_partnership_details(app):
+def test_the_settings_page_shows_every_partnership_detail_and_marks_the_unfilled_ones(app):
     html = dashboard(app).get("/settings").data.decode()
-    assert "Still TODO (3):" in html
-    for label in ("what counts as the eligible payment", "payout terms", "referral tracking"):
-        assert label in html
-    assert PROGRAMME in html and "20% commission" in html and OFFICIAL in html
+    assert "Still TODO (6):" in html
+    for label in ("referral tracking", "payout timing", "payout method", "refunds and incomplete payments", "tax and discounts",
+                  "credit when two people claim a customer"):
+        assert f"Partnership: {label}" in html, label
+    for filled in ("what the commission is paid on", "payout terms", "rewards", "who can join", "how to join", "roles"):
+        assert f"Partnership: {filled}" in html, filled
+    assert PROGRAMME in html and "20% commission on the initial total cost" in html and OFFICIAL in html
+    assert html.count('background:#fee2e2;color:#b91c1c">TODO') == 6  # one badge per unfilled detail
 
 
 def test_a_partnership_question_confirms_the_programme_flags_the_lead_records_it_and_alerts_the_owner(chat, cl):
     cl.classification.update(product="unsure", topic="partnership")
     r = chat.say("I know many hospital owners. Do you pay people who refer customers to you?", turn(PARTNER_REPLY))
-    assert PROGRAMME in r[0] and "20% commission" in r[0] and r[0].rstrip().endswith("introduce?") or "next business time" in r[0]
+    assert PROGRAMME in r[0] and "20% of the initial total cost" in r[0] and "paid once" in r[0] and "no recurring payments" in r[0]
     assert r[0].count("?") == 1
     system = flat(system_of(cl.calls[0]))
     assert "The lead asks about partnership or referrals" in system and PROGRAMME in system
-    assert "Never promise acceptance, eligibility, a payout, a date or any amount" in system
-    assert system.count("UNKNOWN (say the team confirms it personally") == 3  # eligible payment, payout terms, tracking
+    assert "Never promise acceptance or eligibility, never confirm a person or a sale, and never work out a commission" in system
+    assert system.count("UNKNOWN (say the team confirms it personally") == 6  # tracking, timing, method, refunds, tax, credit
     lead = chat.lead
     assert lead.partner_enquiry is True
     q = OpenQuestion.query.one()
     assert q.kind == "unanswered" and q.question.startswith("[Partnership]")
     assert any("Partnership" in t for t in chat.owner_texts())
-    assert "₦" not in r[0] and not re.search(r"\d+% of", r[0])
+    assert "₦" not in r[0] and re.findall(r"\d+%", r[0]) == ["20%"]  # the rate only; never an amount for a product
 
 
 def test_the_example_reply_defers_every_todo_detail_and_makes_no_promise(chat, cl):
@@ -242,7 +266,8 @@ def test_the_example_reply_defers_every_todo_detail_and_makes_no_promise(chat, c
     low = r[0].lower()
     for forbidden in ("you will be accepted", "you will earn", "you are eligible", "guaranteed", "payout", "within 30 days", "renewal"):
         assert forbidden not in low
-    assert "confirms the full terms" in low and not ai._PARTNER_PROMISE_RE.search(r[0])
+    assert "confirms the remaining terms personally" in low and not ai._PARTNER_PROMISE_RE.search(r[0])
+    assert not ai.claims_recurring(r[0])
 
 
 @pytest.mark.parametrize("promise", [

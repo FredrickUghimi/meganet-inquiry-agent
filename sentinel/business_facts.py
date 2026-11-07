@@ -96,17 +96,31 @@ PARTNERSHIP_WHO_CAN_JOIN = ("Anyone with connections to business owners, hospita
 # What the partner does and what Mega-Net does.
 PARTNERSHIP_ROLE = ("The partner introduces potential customers. Mega-Net provides the software demonstrations, proposals, "
                     "sales support and the closing process.")
-# What the partner earns. A rate only: never turned into an amount for a product or sale.
-PARTNERSHIP_REWARDS = ("20% commission on the eligible initial payment of a successful sale or subscription made through the "
-                       "partner's referral.")
+# What the partner earns, in Fredrick's exact words. A rate only: never turned into an amount for a product or customer.
+# "Initial total cost" is not interpreted (not a setup fee, not the first subscription, not the first year).
+PARTNERSHIP_REWARDS = ("20% commission on the initial total cost paid by the referred customer for a successful sale or "
+                       "subscription made through the partner's referral. It is paid once. There are no recurring payments.")
 # How someone joins.
 PARTNERSHIP_HOW_TO_JOIN = "Fredrick or a member of the team confirms the terms and onboards new partners personally."
-# What counts as the "eligible initial payment". TODO until Fredrick defines it; until then the bot explains nothing about it.
-PARTNERSHIP_ELIGIBLE_PAYMENT = "TODO"
-# When and how commission is paid out. TODO until Fredrick defines it.
-PARTNERSHIP_PAYOUT_TERMS = "TODO"
+# What the 20% is paid on. Renewals and later payments earn nothing.
+PARTNERSHIP_ELIGIBLE_PAYMENT = ("The initial total cost paid by the referred customer. The commission is paid once, on that "
+                                "initial payment only.")
+# When a partner is paid, in principle. The date and method are separate facts below and still TODO.
+PARTNERSHIP_PAYOUT_TERMS = ("The partner is paid once, when a customer comes through the partner's referral and makes the "
+                            "initial payment. There are no recurring payments.")
 # How a referral is recorded and credited to a partner. TODO until Fredrick defines it.
 PARTNERSHIP_TRACKING = "TODO"
+# Everything below is TODO until Fredrick defines it. While TODO the bot says the team confirms it personally and promises nothing.
+# How long after the customer's payment the partner is paid.
+PARTNERSHIP_PAYOUT_TIMING = "TODO"
+# How the partner is paid (transfer, cash, wallet...).
+PARTNERSHIP_PAYOUT_METHOD = "TODO"
+# What happens to the commission if the customer is refunded or does not complete payment.
+PARTNERSHIP_REFUNDS = "TODO"
+# Whether the 20% is worked out before or after tax or discounts.
+PARTNERSHIP_TAX_AND_DISCOUNTS = "TODO"
+# Which referrer gets the credit if two people claim the same customer.
+PARTNERSHIP_CREDIT_RULES = "TODO"
 
 PARTNERSHIP_FACTS = (  # (constant name, label): rendered by partnership_block() and listed on the Settings page
     ("PARTNERSHIP_PROGRAMME_NAME", "Partnership programme name"),
@@ -114,9 +128,14 @@ PARTNERSHIP_FACTS = (  # (constant name, label): rendered by partnership_block()
     ("PARTNERSHIP_ROLE", "Partnership: roles"),
     ("PARTNERSHIP_REWARDS", "Partnership: rewards"),
     ("PARTNERSHIP_HOW_TO_JOIN", "Partnership: how to join"),
-    ("PARTNERSHIP_ELIGIBLE_PAYMENT", "Partnership: what counts as the eligible payment"),
+    ("PARTNERSHIP_ELIGIBLE_PAYMENT", "Partnership: what the commission is paid on"),
     ("PARTNERSHIP_PAYOUT_TERMS", "Partnership: payout terms"),
     ("PARTNERSHIP_TRACKING", "Partnership: referral tracking"),
+    ("PARTNERSHIP_PAYOUT_TIMING", "Partnership: payout timing"),
+    ("PARTNERSHIP_PAYOUT_METHOD", "Partnership: payout method"),
+    ("PARTNERSHIP_REFUNDS", "Partnership: refunds and incomplete payments"),
+    ("PARTNERSHIP_TAX_AND_DISCOUNTS", "Partnership: tax and discounts"),
+    ("PARTNERSHIP_CREDIT_RULES", "Partnership: credit when two people claim a customer"),
 )
 
 # --- INTERNAL RULES: addressed to the bot. They go in a separate section of the system prompt that the model must
@@ -153,13 +172,15 @@ SCOPE_INTERNAL_RULE = ("Custom development is never promised; the team assesses 
                        "number and link in the business facts. Never state any other number, or Fredrick's or the owner's.")
 # Only for the partnership topic (see TOPIC_INTERNAL_RULES): loaded with the partnership facts, not in every prompt.
 PARTNERSHIP_INTERNAL_RULE = (
-    "Confirm that the programme exists, give its name and state the filled-in facts. Never confirm that a person or a sale "
-    "is eligible. Never promise acceptance into the programme, a payout, a date, exclusivity or other terms, and never "
-    "negotiate the rate. Never calculate or estimate a commission for a specific product or sale (that would reveal "
-    "prices). For anything marked UNKNOWN say the team confirms it personally. While the eligible-payment fact is UNKNOWN "
-    "never explain what counts as eligible. Never say the 20% applies to renewals or later payments unless a fact says so. "
-    "If a customer says someone referred them, say only that the team will note it; never confirm that a referral is valid "
-    "or that any commission is due.")
+    "Confirm that the programme exists, give its name and state the filled-in facts. You may say the commission is 20% of the "
+    "initial total cost paid by the referred customer, paid once, with no recurring payments, so renewals and later payments "
+    "earn nothing. Use those words only: do not interpret 'initial total cost' (for example as a setup fee, a first "
+    "subscription or a first year). Never confirm that a particular person or sale is eligible. Never calculate or estimate a "
+    "commission for any product or customer (that would reveal prices). Never promise acceptance into the programme, and "
+    "never negotiate the rate. Never promise a payout date or method, and say nothing about refunds, tax, discounts or which "
+    "referrer gets credit, while those facts are UNKNOWN. For anything UNKNOWN say the team confirms it personally. If a "
+    "customer says someone referred them, say only that the team will note it; never confirm that a referral is valid or that "
+    "any commission is due.")
 
 INTERNAL_RULES = (  # (constant name, label) in the order they appear in the prompt
     ("DEMO_BOOKING_WORKFLOW", "Demo booking workflow"),

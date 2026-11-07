@@ -472,6 +472,10 @@ def _record_open_question(lead, flag, question, already_alerted, say):
 # One-line descriptions use only what the core product notes say about each product; never what a video contains.
 VIDEO_BLURB = {"ehr_cloud": "our cloud electronic health records system for clinics and hospitals",
                "erp_cloud": "our cloud ERP for businesses (operations, finance and inventory)"}
+VIDEO_REQUEST_RE = re.compile(
+    r"\b(demo|demos|demonstration|demonstrate|show\s+me|show\s+us|see\s+(?:it|the|how|your|a|an)|wan\s+see|make\s+i\s+see|"
+    r"watch|videos?|walk\s+(?:me|us|them)\s+through|walk\s?through|presentation|overview|trial|what\s+does\s+it\s+look\s+like|"
+    r"how\s+(?:does|do|will|would|can)\s+(?:it|this|that|they|the\s+\w+(?:\s+\w+)?)\s+work|how\s+(?:it|they)\s+works?)\b", re.I)
 PERSONALISED_RE = re.compile(r"personali[sz]ed\s+(live\s+)?(demo|demonstration)", re.I)
 OFFER_LINE_RE = re.compile(knowledge.OFFER_LINE_RE, re.I)
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+|\byoutu\.be/\S+", re.I)
@@ -761,7 +765,16 @@ def apply_turn(lead, turn, pending, history, now, dry_run, say, situation=None):
     # 3. video (exact links added by code; never twice in 24 hours)
     video = turn.get("share_video")
     prefers_team = demo.prefers_team(latest)
-    if sig == "wants_demo" and not video and not prefers_team and before != "declined":
+    # A video goes out only when the customer asked for a demo, asked how it works or asked to see the product (the approved
+    # first product reply, handled above, is the one other path). Claude's own share_video / wants_demo signals alone are
+    # not enough: a question about a retired product once attached a video.
+    recent_asks = " ".join(m.body for m in history if m.direction == "inbound" and m.body)[-600:]
+    asked_for_video = bool(VIDEO_REQUEST_RE.search(latest)
+                           or (sig == "wants_demo" and VIDEO_REQUEST_RE.search(recent_asks)))  # "one more time please"
+    if video and not asked_for_video:
+        log.info("lead=%s video not attached: the customer did not ask for a demo or to see the product", lead.id)
+        video = None
+    if sig == "wants_demo" and not video and not prefers_team and before != "declined" and asked_for_video:
         video = lead.product_interest if lead.product_interest in VIDEO_BLURB else "both"
     links = []
     if video and not prefers_team:
