@@ -55,6 +55,8 @@ def load_config():
         # Anthropic
         "ANTHROPIC_API_KEY": _env("ANTHROPIC_API_KEY"),
         "ANTHROPIC_MODEL": _env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
+        # auto = switch off hidden reasoning where the model allows it (faster, no max_tokens hits); default = leave it alone
+        "ANTHROPIC_THINKING": (_env("ANTHROPIC_THINKING", "auto") or "auto").lower(),
         # WhatsApp Cloud API
         "WHATSAPP_TOKEN": _env("WHATSAPP_TOKEN"),
         "WHATSAPP_PHONE_NUMBER_ID": _env("WHATSAPP_PHONE_NUMBER_ID"),

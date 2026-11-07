@@ -1,5 +1,6 @@
 """Password-protected dashboard (single user) and the manual intake form."""
 import hmac
+import logging
 import secrets
 from functools import wraps
 from zoneinfo import ZoneInfo
@@ -10,6 +11,7 @@ from . import service, whatsapp
 from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
 from .scheduler import run_async
 
+log = logging.getLogger(__name__)
 bp = Blueprint("dashboard", __name__)
 
 STATUS_ORDER = ["ready", "new", "engaged", "cold", "closed_won", "closed_lost"]
@@ -150,7 +152,10 @@ def delete_leads():
 @login_required
 def leads():
     status = request.args.get("status")
+    partners = request.args.get("partner") == "1"
     query = Lead.query
+    if partners:
+        query = query.filter(Lead.partner_enquiry.is_(True))
     if status and status != "needs_reply":
         query = query.filter_by(status=status)
     rows = query.order_by(Lead.last_contact_at.desc().nullslast(), Lead.created_at.desc()).all()
@@ -158,7 +163,7 @@ def leads():
         rows = [l for l in rows if service.reply_wait_since(l) is not None]
     rows.sort(key=lambda l: l.status != "ready")  # stable: ready leads float to the top
     rows.sort(key=lambda l: service.reply_wait_since(l) is None)  # then leads waiting for Fredrick above all
-    return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status,
+    return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status, partners=partners,
                            select=request.args.get("select") == "1")
 
 
@@ -182,7 +187,7 @@ def settings():
     """Read-only view of the business facts the bot uses and how conversations are handled. No secrets."""
     from . import business_facts as bf
     cfg = current_app.config
-    facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.FACTS]
+    facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.ALL_FACTS]
     modes = [("Running commit", (cfg.get("GIT_COMMIT") or "unknown")[:7]),
              ("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
              ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"])]
@@ -218,6 +223,20 @@ def owner_reply(lead_id):
         quote = db.session.get(Message, int(request.form["quote"]))
     ok, detail = service.owner_reply(lead, request.form.get("text", ""), quote=quote)
     flash(detail)
+    return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
+
+
+@bp.post("/leads/<int:lead_id>/referrer")
+@login_required
+def set_referrer(lead_id):
+    """Edit who referred this lead (CSRF-checked by before_request; dashboard login required). Blank clears it."""
+    lead = db.session.get(Lead, lead_id) or abort(404)
+    name = " ".join(request.form.get("referrer_name", "").split())[:120] or None
+    phone = " ".join(request.form.get("referrer_phone", "").split())[:40] or None
+    lead.referrer_name, lead.referrer_phone = name, phone
+    db.session.commit()
+    log.info("referrer %s for lead=%s (edited in the dashboard)", "set" if (name or phone) else "cleared", lead.id)
+    flash("Referrer saved." if (name or phone) else "Referrer cleared.")
     return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 
 

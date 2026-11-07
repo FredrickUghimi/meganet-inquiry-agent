@@ -115,10 +115,13 @@ def test_todo_facts_are_unknown_in_prompt_and_warned(app, caplog, monkeypatch):
 
 def test_settings_page_lists_todo_facts(app, monkeypatch):
     monkeypatch.setattr(business_facts, "TRAINING", "TODO")
-    assert "Still TODO (1):</b> Training" in client(app).get("/settings").data.decode()
+    page = client(app).get("/settings").data.decode()
+    assert "Still TODO (4):</b> Training" in page and "Partnership: payout terms" in page
     monkeypatch.undo()
     html = client(app).get("/settings").data.decode()
-    assert "Demo channels" in html and "Mon-Fri 09:00-17:00" in html and "Nothing is TODO" in html
+    assert "Demo channels" in html and "Mon-Fri 09:00-17:00" in html
+    assert "Still TODO (3):</b> Partnership: what counts as the eligible payment, Partnership: payout terms, Partnership: referral tracking" in html
+    assert "Mega-Net Referral Partnership Programme" in html and "+234 707 600 0030" in html
     assert "ANTHROPIC" not in html and "tok" not in html
 
 

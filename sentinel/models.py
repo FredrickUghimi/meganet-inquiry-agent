@@ -46,6 +46,9 @@ class Lead(db.Model):
     upgrade_enquiry = db.Column(db.Boolean, nullable=False, default=False)  # existing client whose latest message is a sales enquiry
     existing_alerted_at = db.Column(db.DateTime)  # owner told once that this lead is an existing client
     handback_at = db.Column(db.DateTime)  # Fredrick handed the lead back to the bot (resume/reopen)
+    referrer_name = db.Column(db.String(120))  # who sent this lead to Mega-Net (said by the customer or set by the owner)
+    referrer_phone = db.Column(db.String(40))
+    partner_enquiry = db.Column(db.Boolean, nullable=False, default=False)  # asked about the referral partnership programme
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",

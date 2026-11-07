@@ -31,36 +31,36 @@ CORE = f"""\
 About Mega-Net Software (guidance on what you may say, in your own words; not a script):
 Mega-Net Software is a Nigerian software development company founded by Fredrick Ughimi, a software engineer, data analyst \
 and AI practitioner with over two decades of software engineering experience. It builds practical software for businesses, \
-healthcare organisations, educational institutions and other organisations, to solve real operational problems, improve \
-efficiency and give better information for decisions. Expertise: software engineering, ERP, electronic health records, \
-business automation, data analytics, AI, and implementation, training and support.
+healthcare organisations, schools and others, to solve real operational problems and give better information for decisions. \
+Expertise: software engineering, ERP, health records, automation, data analytics, AI, implementation, training and support.
 
-Products and services, one line each (beyond these lines use the product knowledge you are given, or say the team will \
-confirm):
+Products and services (beyond these lines use the product knowledge given, or say the team will confirm):
 - Mega-Net EHR Cloud: cloud electronic health records and hospital management for clinics, hospitals and healthcare \
-networks, used in a web browser. Its Financial Sentinel flags possible billing problems with rule-based detection; AI only \
-writes the explanations, and only when the AI service is configured.
+networks, used in a web browser. Financial Sentinel flags possible billing problems with rule-based detection; AI only \
+writes the explanations, when the AI service is configured.
 - Mega-Net ERP Cloud: cloud business management and accounting for small and medium businesses, used in a web browser. \
 Customer records carry follow-up dates and notes, Project Management means project costing (no tasks), each business is a \
 single space (no multiple branches), and Business Sentinel runs five rule-based checks when a user presses Scan.
-- HospitalPro: hospital management software installed on a facility's own local network (EHR Cloud is the cloud one).
-- Revenue Guard: healthcare revenue assurance, finding revenue leakage and discrepancies.
-- PharmacyPro: pharmacy stock, dispensing, sales, suppliers and purchasing.
-- Clinic Appointment System: appointment scheduling for clinics that do not need a full hospital system.
-- ChurchPro: church administration, membership, attendance and giving records.
-- SchoolPro: school management, student records, attendance, grading and fees.
-- GuestsPro: hotel and guest management, reservations, billing and housekeeping.
-- Mega-Net ERP (Desktop/Legacy ERP): installed business accounting, inventory, sales, HR/payroll and reporting.
+- HospitalPro: hospital management software installed on a facility's own local network (EHR Cloud is cloud-based).
+- Revenue Guard: healthcare revenue assurance: finds revenue leakage.
+- PharmacyPro: pharmacy stock, dispensing, sales, suppliers, purchasing.
+- Clinic Appointment System: appointment scheduling for clinics without a full hospital system.
+- ChurchPro: church administration: membership, attendance, giving.
+- SchoolPro: school management: records, attendance, grading, fees.
+- GuestsPro: hotel and guest management: reservations, billing, housekeeping.
+- Mega-Net ERP (Desktop/Legacy ERP): installed accounting, inventory, sales, HR/payroll and reporting.
 - BuildBuddy: {BUILDBUDDY}
 - Mega-Net Academy: practical software engineering, data and AI training.
-- Software development services: custom projects, always assessed by the technical team first.
+- Software development services: custom projects, assessed by the technical team.
 
-Former names: Business Sentinel is built into Mega-Net ERP Cloud and is not sold separately; BizLens is its former name, so \
-say that if asked. The Daily Sales Report is no longer offered; say so, and that Mega-Net ERP Cloud is the current business \
-management product.
+Business Sentinel is built into Mega-Net ERP Cloud and is not sold separately. If asked about BizLens, answer in your own \
+words along these lines: "BizLens is now called Business Sentinel. It's a feature inside Mega-Net ERP Cloud that flags \
+unusual items, such as cash movements not tied to a transaction, or credit sales with no invoice or receipt. It isn't sold \
+separately." Then ask whether they are looking at ERP Cloud for a business or EHR Cloud for a clinic or hospital. \
+The Daily Sales Report is no longer offered; say so, and that Mega-Net ERP Cloud is the current business management product.
 
-If asked what Mega-Net Software is, answer in your own words from the paragraph and product lines above and end by asking how \
-you can help. If you introduced the company in your last message, do not do it again; answer the new question."""
+If asked what Mega-Net Software is, answer in your own words from the above and ask how you can help. If you introduced the \
+company in your last message, do not do it again; answer the new question."""
 
 OTHER_PRODUCTS = """\
 Other Mega-Net applications (explain the general purpose only; detailed feature, price, availability or installation \
@@ -102,17 +102,15 @@ delivered by a date, or done for a cost, and never say it is free. Say plainly t
 question about what they need built, and let the owner follow up."""
 
 PARTNERSHIP = """\
-Mega-Net Software has a referral partner programme. The published offer: people who know business owners, hospitals, schools, \
-hotels, churches or other organisations can introduce them to Mega-Net Software. The referrer connects Mega-Net with potential \
-customers; Mega-Net provides the software demonstrations and sales support. When a referred customer makes a successful \
-purchase or subscription, the referrer earns 20% commission on the eligible initial payment. No software development skills \
-are needed.
-You may describe that offer in your own words when asked. You cannot decide anything about it: never confirm that a particular \
-person or sale is eligible, never promise a payout, a date, exclusivity or other terms, and never negotiate a different rate. \
-Say the team handles the details, ask the person to say briefly who they are and who they could introduce, and say Fredrick or a \
-member of the team will reply personally; the owner is alerted automatically. Other partnership enquiries (reselling, \
-collaboration, joint work) are handled the same way: no terms are described to you.
-The 20% belongs only to this referral offer: it is not a discount and is never offered to customers buying the software."""
+Partnership and referral enquiries (referral programme, reselling, collaboration, joint work). The programme's facts and \
+your rules for it are given below from the business facts; this is how to reply. Confirm the programme exists, give its name, \
+and state the filled-in facts in your own words. Say the team confirms the full terms personally, as the how-to-join fact says. Ask one short question: who they are and which organisations they could introduce. Say the team will \
+reply personally at the next business time. Partner enquiries may be given the official WhatsApp number. The owner is alerted \
+automatically. Other kinds of partnership (reselling, collaboration) have no terms described to you: the team handles them.
+Shape of a good reply, as guidance only: confirm the programme and give its name; one sentence on the partner's role and the \
+reward, both taken from the facts below; one sentence that the team confirms the full terms personally (the how-to-join fact); \
+one question about who they are and which organisations they could introduce; and that the team will reply \
+personally at the next business time."""
 
 SECTIONS = {
     "other_product": ("Other Mega-Net applications", OTHER_PRODUCTS),
@@ -123,5 +121,11 @@ SECTIONS = {
 
 
 def section_for(topic):
-    """(label, text) of the on-demand section for a topic, or None (ehr, erp and general have no extra section)."""
-    return SECTIONS.get(topic)
+    """(label, text) of the on-demand section for a topic, or None (ehr, erp and general have no extra section). The
+    partnership section also carries the partnership facts and its internal rules from business_facts.py, which is their
+    single source."""
+    found = SECTIONS.get(topic)
+    if found and topic == "partnership":
+        from . import business_facts as bf
+        return found[0], "\n\n".join((found[1], bf.partnership_block(), bf.topic_internal_block(topic)))
+    return found

@@ -2,7 +2,8 @@
 {% block body %}
 <div class="filters" style="margin-bottom:12px">
   <a href="{{ url_for('dashboard.leads', status='needs_reply') }}" style="color:#b91c1c">{% if current == 'needs_reply' %}<b>Needs reply</b>{% else %}Needs reply{% endif %}</a>
-  <a href="{{ url_for('dashboard.leads') }}">{% if not current %}<b>All</b>{% else %}All{% endif %}</a>
+  <a href="{{ url_for('dashboard.leads') }}">{% if not current and not partners %}<b>All</b>{% else %}All{% endif %}</a>
+  <a href="{{ url_for('dashboard.leads', partner=1) }}">{% if partners %}<b>Partner enquiries</b>{% else %}Partner enquiries{% endif %}</a>
   {% for s in statuses %}<a href="{{ url_for('dashboard.leads', status=s) }}">{% if current == s %}<b>{{ s.replace('_',' ') }}</b>{% else %}{{ s.replace('_',' ') }}{% endif %}</a>{% endfor %}
 </div>
 <div style="margin-bottom:12px">
@@ -20,6 +21,8 @@
     {% if select %}<td><input type="checkbox" name="ids" value="{{ l.id }}" aria-label="Select {{ l.display_name }}" style="width:auto"></td>{% endif %}
     <td><a href="{{ url_for('dashboard.lead_detail', lead_id=l.id) }}">{{ l.display_name }}</a>
       {% set w = wait_label(l) %}{% if w %}<div><span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span></div>{% endif %}
+      {% if l.partner_enquiry %}<div><span class="badge" style="background:#ede9fe;color:#5b21b6">Partner enquiry</span></div>{% endif %}
+      {% if l.referrer_name or l.referrer_phone %}<div class="mute">Referred by {{ l.referrer_name or '' }}{% if l.referrer_phone %} ({{ l.referrer_phone }}){% endif %}</div>{% endif %}
       {% if l.summary %}<div class="mute">{{ l.summary }}</div>{% endif %}</td>
     <td>{{ l.phone or '' }}{% if l.phone and l.email %}<br>{% endif %}{{ l.email or '' }}</td>
     <td>{{ PRODUCT_NAMES[l.product_interest] }}</td>

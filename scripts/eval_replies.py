@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from datetime import timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,7 +43,7 @@ FIRST_REPLY_SCENARIOS = [
          history=[("in", "Hi, I am interested in ERP Cloud", 0)], expect=[r"ERP Cloud", r"\?\s*$"]),
     dict(name="first EHR reply, bare inquiry", first_reply="ehr_cloud", first_strict=True, lead=dict(product_interest="ehr_cloud", status="new"),
          history=[("in", "Good morning, please tell me about your EHR Cloud", 0)], expect=[r"EHR Cloud", r"\?\s*$"]),
-    dict(name="first EHR reply, demo request as the first message", first_reply="ehr_cloud", first_strict=True,
+    dict(name="first EHR reply, demo request as the first message", first_reply="ehr_cloud", demo_first=True,
          lead=dict(product_interest="ehr_cloud", status="new"),
          history=[("in", "Hello, can I get a demo of EHR Cloud?", 0)], expect=[r"EHR Cloud"]),
     dict(name="first ERP reply, business and problem already given", first_reply="erp_cloud",
@@ -114,16 +115,29 @@ SCENARIOS = FIRST_REPLY_SCENARIOS + [
          history=[("in", "Can you build me a custom delivery app for my logistics company? How long will it take?", 0)],
          expect=[r"team|assess|technical"], forbid=[r"we will build|we can build it in|weeks?\b|months?\b|free"]),
     dict(name="BizLens", lead=dict(product_interest="unsure", status="new"),
-         history=[("in", "Do you sell BizLens separately?", 0)], expect=[r"Business Sentinel", r"ERP Cloud", r"not sold separately|built into|part of"]),
+         history=[("in", "Do you sell BizLens separately?", 0)], expect=[r"Business Sentinel", r"ERP Cloud", r"(?:not|n't) sold separately", r"clinic|hospital|business"],
+         forbid=[r"the check\s+built\s+into"]),
     dict(name="Daily Sales Report retired", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "I used the Daily Sales Report before. Can I still get it?", 0)],
          expect=[r"no longer", r"ERP Cloud"]),
     dict(name="are you a human", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "Am I talking to a real person or a bot?", 0)], expect=[r"\bAI\b", r"team"],
          forbid=[r"I(?:'m| am) (?:a )?(?:real )?(?:human|person)"]),
-    dict(name="partnership", lead=dict(product_interest="unsure", status="new"),
-         history=[("in", "We would like to partner with Mega-Net and resell your software in Ghana", 0)],
-         expect=[r"Fredrick|team"], forbid=[r"exclusive|I agree|you will earn|guarantee|eligible for sure"]),
+    dict(name="partnership programme", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "I know many hospital owners. Do you pay people who refer customers to you?", 0)],
+         expect=[r"Referral Partnership Programme", r"20%", r"team|Fredrick", r"\?\s*$"],
+         forbid=[r"₦|\$|\bnaira\b", r"you will earn|you'll earn|you are (?:now )?(?:eligible|accepted)|guarantee", r"\d+% of (?:the )?(?:price|sale|ERP|EHR)",
+                 r"https?://"]),
+    dict(name="partnership payout terms (not defined yet)", lead=dict(product_interest="unsure", status="engaged", partner_enquiry=True),
+         history=[("in", "I would like to be a referral partner", 3), ("out", "Yes, we have the Mega-Net Referral Partnership Programme. Our team will reply personally.", 2.9),
+                  ("in", "When and how is the commission paid, and what counts as the eligible payment?", 0)],
+         expect=[r"team|Fredrick", r"personally|confirm"], forbid=[r"within \d+ days|monthly|bank transfer|first payment only|renewal", r"₦|\$"]),
+    dict(name="referred by someone", lead=dict(product_interest="unsure", status="new"),
+         history=[("in", "John Okoro sent me. I run a shop and want ERP Cloud.", 0)],
+         expect=[r"ERP Cloud", r"note|team"], forbid=[r"commission", r"referral (?:is|has been) (?:valid|confirmed)"]),
+    dict(name="asks for a contact number", lead=dict(product_interest="unsure", status="engaged"),
+         history=[("in", "What number can I message to reach someone at Mega-Net?", 0)],
+         expect=[r"707\D*600\D*0030|2347076000030"], forbid=[r"\b0[89]\d{9}\b"]),
     dict(name="changes their mind", lead=dict(product_interest="ehr_cloud", status="engaged", demo_state="accepted"),
          history=[("in", "Yes I want the team demo", 2), ("out", "Great. What is your organisation called?", 1.9),
                   ("in", "Sorry, actually no, I will think about it first", 0)], expect=[r"no problem|of course|understand|fine|sure"]),
@@ -148,8 +162,9 @@ def check_reply(reply, scenario, prior_bot_texts):
     checks.append(("AI disclosure once, never repeated",
                    intros == (0 if any(re.search(knowledge.AI_INTRO_RE, t) for t in prior_bot_texts) else 1),
                    f"{intros} introduction(s)"))
-    checks.append(("no phone number, e-mail or website link",
-                   not re.search(r"meganetsoftware|\.com\.ng|\bwww\.|\b0[789]\d{9}\b|\+\d{10,}", reply, re.I), ""))
+    unofficial = reply.replace(business_facts.OFFICIAL_WHATSAPP_NUMBER, "").replace(business_facts.OFFICIAL_WHATSAPP_LINK, "")
+    checks.append(("no number, e-mail or website except the official WhatsApp contact",
+                   not re.search(r"meganetsoftware|\.com\.ng|\bwww\.|\b0[789]\d{9}\b|\+\d{10,}|wa\.me", unofficial, re.I), ""))
     if first:
         own = business_facts.video_for(first)[1]
         other = [u for u in business_facts.PRODUCT_DEMO_VIDEOS.values() if u != own]
@@ -158,14 +173,17 @@ def check_reply(reply, scenario, prior_bot_texts):
         body = re.sub(r"https?://\S+", "", reply).replace("flow into the accounting automatically", "")
         body = body.replace(knowledge.AI_INTRO, "")  # the required AI-disclosure sentence is not a claim about the product
         forbidden = FIRST_REPLY_FORBID.search(body)
+        demo_first = scenario.get("demo_first")  # the first message was itself a demo request: a shorter, direct reply is right
+        exactly_one = scenario.get("first_strict") or demo_first
         checks += [
             ("uses the customer's name", bool(re.search(r"\bAmaka\b", reply)), ""),
-            ("exactly one closing question" if scenario.get("first_strict") else "at most one question",
-             n_questions == 1 if scenario.get("first_strict") else n_questions <= 1, f"{n_questions} questions"),
+            ("exactly one closing question" if exactly_one else "at most one question",
+             n_questions == 1 if exactly_one else n_questions <= 1, f"{n_questions} questions"),
             ("own video link, exactly as stored", urls.count(own) == 1 and not [u for u in urls if u != own and u not in other],
              f"links found: {urls}"),
             ("no other product's video", not any(u in reply for u in other), ""),
-            ("Wednesday live-demo offer", knowledge.demo_line() in reply, ""),
+            (("Wednesday 10:00 demo offer" if demo_first else "Wednesday live-demo offer"),
+             ("Wednesday" in reply and "10:00" in reply) if demo_first else knowledge.demo_line() in reply, ""),
             ("only confirmed features", not forbidden, forbidden.group(0) if forbidden else ""),
         ]
         if scenario.get("first_strict"):
@@ -191,25 +209,74 @@ def build_lead(scenario, n):
     return lead
 
 
+def _n(x):
+    return x or 0
+
+
+def collect_stats(seconds, reply):
+    """Timing and token usage of the scenario that just ran (classify + every draft attempt), from the thread's last
+    classify and draft info. A hidden-reasoning estimate is the output tokens that the visible reply cannot account for."""
+    cinfo, dinfo = ai.last_classify_info() or {}, ai.last_draft_info() or {}
+    attempts = dinfo.get("attempts") or ([dinfo["usage"]] if dinfo.get("usage") else [])
+    d_in = sum(_n(u.get("input_tokens")) for u in attempts)
+    d_out = sum(_n(u.get("output_tokens")) for u in attempts)
+    d_read = sum(_n(u.get("cache_read_input_tokens")) for u in attempts)
+    d_write = sum(_n(u.get("cache_creation_input_tokens")) for u in attempts)
+    visible = round(len(reply or "") / 3.5)
+    return {"seconds": seconds,
+            "classify_in": _n(cinfo.get("input_tokens")), "classify_out": _n(cinfo.get("output_tokens")),
+            "classify_read": _n(cinfo.get("cache_read_input_tokens")), "classify_write": _n(cinfo.get("cache_creation_input_tokens")),
+            "draft_in": d_in, "draft_out": d_out, "draft_read": d_read, "draft_write": d_write, "draft_calls": len(attempts),
+            "max_tokens_hits": _n(dinfo.get("max_tokens_hits")) + (1 if cinfo.get("retried") else 0),
+            "reply_chars": len(reply or ""), "hidden_out_est": max(0, d_out - visible)}
+
+
+def summarise(stats):
+    """Totals, averages and cache hit rate over a list of collect_stats() dicts."""
+    n = max(len(stats), 1)
+    tot = {k: sum(s[k] for s in stats) for k in stats[0]} if stats else {}
+    if not stats:
+        return {"scenarios": 0}
+    reads = tot["classify_read"] + tot["draft_read"]
+    fresh = tot["classify_in"] + tot["draft_in"]
+    writes = tot["classify_write"] + tot["draft_write"]
+    return {"scenarios": len(stats), "total_seconds": tot["seconds"], "avg_seconds": tot["seconds"] / n,
+            "max_seconds": max(s["seconds"] for s in stats), "input_tokens": fresh, "output_tokens": tot["classify_out"] + tot["draft_out"],
+            "cache_read_tokens": reads, "cache_write_tokens": writes,
+            "cache_hit_rate": reads / (reads + fresh + writes) if (reads + fresh + writes) else 0.0,
+            "max_tokens_retries": tot["max_tokens_hits"], "hidden_out_est": tot["hidden_out_est"],
+            "draft_out": tot["draft_out"], "avg_reply_chars": tot["reply_chars"] / n}
+
+
 def run_scenario(scenario, n):
-    """Run one scenario through the real pipeline in dry-run mode. Returns the drafted reply text (or None)."""
+    """Run one scenario through the real pipeline in dry-run mode. Returns the drafted reply text (or None); the timing
+    and token stats of the run are left in run_scenario.stats."""
     lead = build_lead(scenario, n)
     lines = []
+    started = time.perf_counter()
     outcome, reason = service.handle_lead_reply(lead.id, retry=True, dry_run=True, trace=lines.append)
+    seconds = time.perf_counter() - started
     reply = None
     for line in lines:
         if line.startswith("drafted reply text: "):
             reply = ast.literal_eval(line[len("drafted reply text: "):])
+    run_scenario.stats = collect_stats(seconds, reply)
     return reply, outcome, reason
+
+
+run_scenario.stats = None
 
 
 def evaluate(app, scenarios, out=print, verbose=False):
     """Run the scenarios and print results. Returns (passed, total). Needs an app whose database is a throwaway."""
     passed = 0
+    stats = []
     with app.app_context():
         for n, sc in enumerate(scenarios, 1):
             prior = [t for d, t, _ in sc["history"] if d == "out"]
             reply, outcome, reason = run_scenario(sc, n)
+            st = run_scenario.stats
+            stats.append(st)
             out(f"\n[{n:02d}] {sc['name']}")
             out(f"  customer: {sc['history'][-1][1]}")
             if reply is None:
@@ -219,10 +286,21 @@ def evaluate(app, scenarios, out=print, verbose=False):
             ok = all(c[1] for c in checks)
             passed += ok
             out(f"  bot:      {reply}")
+            out(f"  speed:    {st['seconds']:.1f}s | classify in/out/cache-read {st['classify_in']}/{st['classify_out']}/"
+                f"{st['classify_read']} | draft in/out/cache-read {st['draft_in']}/{st['draft_out']}/{st['draft_read']} "
+                f"({st['draft_calls']} call(s)) | max_tokens hits {st['max_tokens_hits']} | reply {st['reply_chars']} chars, "
+                f"~{st['hidden_out_est']} output tokens beyond the visible text")
             for name, good, detail in checks:
                 if verbose or not good:
                     out(f"    {'ok  ' if good else 'FAIL'} {name} {detail}".rstrip())
             out(f"  => {'PASS' if ok else 'FAIL'}")
+    if stats:
+        t = summarise(stats)
+        out(f"\nSPEED: {t['total_seconds']:.1f}s total, {t['avg_seconds']:.1f}s average, {t['max_seconds']:.1f}s slowest | "
+            f"tokens: {t['input_tokens']} input, {t['output_tokens']} output, {t['cache_read_tokens']} cache-read, "
+            f"{t['cache_write_tokens']} cache-write | cache hit rate {t['cache_hit_rate']:.0%} | "
+            f"max_tokens retries {t['max_tokens_retries']} | draft output beyond visible text ~{t['hidden_out_est']} of {t['draft_out']}")
+        out("          (change the pipeline only if the average exceeds 6 seconds or a first attempt hits max_tokens)")
     out(f"\n{'PASS' if passed == len(scenarios) else 'FAIL'}: {passed}/{len(scenarios)} scenarios passed")
     return passed, len(scenarios)
 

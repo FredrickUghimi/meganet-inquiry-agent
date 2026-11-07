@@ -56,7 +56,12 @@ def test_stored_video_links_match_exactly():
 
 def test_demo_rules_constants():
     assert (business_facts.DEMO_WEEKDAY, business_facts.DEMO_START_TIME, business_facts.DEMO_SLOTS_PER_SESSION) == ("Wednesday", "10:00", 1)
-    assert demo.duration() == 30 and demo.notice_hours() == 2 and business_facts.todo_names() == []
+    assert demo.duration() == 30 and demo.notice_hours() == 2
+
+
+def test_only_the_three_undefined_partnership_facts_are_still_todo():
+    assert business_facts.todo_names() == ["PARTNERSHIP_ELIGIBLE_PAYMENT", "PARTNERSHIP_PAYOUT_TERMS", "PARTNERSHIP_TRACKING"]
+    assert not [n for n, _ in business_facts.FACTS if business_facts.is_todo(n)]  # every operational fact is filled in
 
 
 def test_internal_rules_are_in_a_separate_never_reveal_section(app):

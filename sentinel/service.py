@@ -262,7 +262,12 @@ def send_owner_alert(lead, line):
     Returns True if any channel delivered; stamps lead.last_owner_alert_at (the throttle) on success."""
     url = f"{current_app.config['PUBLIC_BASE_URL']}/leads/{lead.id}"
     suffix = f' (lead {lead.id}) Reply "done {lead.id}" after you have contacted them.'
-    line = templates_meta.clean_param(line, 400 - len(suffix)) + suffix
+    ref = ""
+    if getattr(lead, "referrer_name", None) or getattr(lead, "referrer_phone", None):
+        who = lead.referrer_name or ""
+        who += (f" ({lead.referrer_phone})" if who else lead.referrer_phone) if lead.referrer_phone else ""
+        ref = " [Referred by " + templates_meta.clean_param(who, 80) + "]"
+    line = templates_meta.clean_param(line, 400 - len(suffix) - len(ref)) + ref + suffix
     delivered = _alert_whatsapp(lead, line, url)
     mailed = emailer.send_alert(f"Mega-Net lead: {lead.display_name}", f"{line}\n{url}")
     delivered = bool(delivered or mailed)
@@ -654,9 +659,9 @@ def _pencil(lead, d, start):
 
 
 def sanitize_links(text):
-    """Only the stored demo video links may appear in a reply, character for character. Any other link Claude wrote (or a
-    rewritten or shortened copy of one) is removed."""
-    approved = set(business_facts.PRODUCT_DEMO_VIDEOS.values())
+    """Only the stored demo video links and the official WhatsApp link may appear in a reply, character for character. Any
+    other link Claude wrote (or a rewritten or shortened copy of one) is removed."""
+    approved = set(business_facts.PRODUCT_DEMO_VIDEOS.values()) | {business_facts.OFFICIAL_WHATSAPP_LINK}
 
     def keep(m):
         url = m.group(0)
@@ -1214,6 +1219,17 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
             return outcome
     topic, other_product = ai.resolve_topic(result, latest)
     say(f"topic={topic}" + (f" ({other_product})" if other_product else ""))
+    referral_said = bool(result.get("referrer_name") or result.get("referrer_phone"))
+    if not dry_run:
+        changed = False
+        if topic == "partnership" and not lead.partner_enquiry:
+            lead.partner_enquiry, changed = True, True
+        if referral_said and not (lead.referrer_name or lead.referrer_phone):  # the owner's edit is never overwritten
+            lead.referrer_name, lead.referrer_phone = result.get("referrer_name"), result.get("referrer_phone")
+            changed = True
+            log.info("referrer set for lead=%s (said by the customer)", lead.id)
+        if changed:
+            db.session.commit()
     hint = ai.heuristic_intent(latest)
     if topic == "academy":
         hint = None  # Academy fees and dates are the Academy team's, not a Mega-Net software pricing lead
@@ -1261,7 +1277,9 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         say(f"topic {topic} is referred to the team with an owner alert")
     if flag and not dry_run:
         _record_open_question(lead, flag, question, newly_ready, say)
-    if flag:
+    if topic == "partnership" and flag in (None, "none", "unanswered", "custom_request"):
+        situation = "partner"
+    elif flag:
         situation = flag
     elif first_contact and lead.product_interest in knowledge.FIRST_REPLIES:
         situation = "first_product_reply"  # the product is known: the approved first reply
@@ -1284,6 +1302,9 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if is_open:
         now = utcnow()
         context = demo_context(lead, history, pending, now, intent)
+        if referral_said:
+            context += ("\nThe customer says someone referred them. Say only that the team will note it; never confirm that "
+                        "the referral is valid or that any commission is due.")
         fixed = None
         if situation == "first_product_reply":
             disclosed = ai.ai_disclosed(history)

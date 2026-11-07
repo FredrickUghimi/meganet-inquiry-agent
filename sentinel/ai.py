@@ -35,6 +35,38 @@ def _get_client():
     return _client
 
 
+_thinking_rejected = False
+
+
+def _request_extras(model):
+    """Switch off hidden reasoning for the short, structured calls this app makes (a reply of 300 characters was spending its
+    whole 1500-token budget on reasoning, then retrying, at about nine seconds a reply). ANTHROPIC_THINKING=default leaves the
+    model's own setting alone. Haiku 5.5 accepts thinking disabled; Sonnet 5.5 takes between_tools; other models are untouched."""
+    if _thinking_rejected or current_app.config.get("ANTHROPIC_THINKING", "auto") == "default":
+        return {}
+    if model.startswith("claude-haiku-5"):
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
+    if model.startswith("claude-sonnet-5-5"):
+        return {"extra_body": {"thinking": {"type": "between_tools"}}}
+    return {}
+
+
+def _create(**kw):
+    """messages.create with the thinking setting above; if the API rejects it for this model, remember that, say so once and
+    send the request again without it."""
+    global _thinking_rejected
+    extras = _request_extras(kw["model"])
+    try:
+        return _get_client().messages.create(**kw, **extras)
+    except anthropic.BadRequestError as exc:
+        if not extras or "thinking" not in str(getattr(exc, "message", exc)).lower():
+            raise
+        _thinking_rejected = True
+        log.warning("the API rejected the thinking setting for model %s (%s); sending requests without it", kw["model"],
+                    describe_error(exc))
+        return _get_client().messages.create(**kw)
+
+
 # Scripted lines from retired releases. They must never be sent again, and they must not teach Claude to copy them, because
 # conversations already in the database still contain them.
 RETIRED_FRAGMENTS = ("shared the demo video with you earlier",)
@@ -149,7 +181,8 @@ CLASSIFY_INSTRUCTIONS = (
     '"product": "ehr_cloud|erp_cloud|unsure", "name": "<lead\'s name or null>", "summary": "<one line>", '
     '"flag": "none|complaint|custom_request|unanswered", "question": "<the lead\'s question or null>", '
     '"existing_client": true|false, "client_topic": "support|sales|null", '
-    '"topic": "ehr|erp|other_product|academy|dev_services|partnership|general", "other_product": "<name or null>"}\n'
+    '"topic": "ehr|erp|other_product|academy|dev_services|partnership|general", "other_product": "<name or null>", '
+    '"referrer_name": "<name or null>", "referrer_phone": "<number or null>"}\n'
     "intent: exploring = still learning or undecided; ready_demo = asks for or agrees to a demo/call/meeting; "
     "ready_pricing = asks what it costs or for a quote/proposal; not_fit = clearly not a match or says they "
     "are not interested.\n"
@@ -170,7 +203,9 @@ CLASSIFY_INSTRUCTIONS = (
     "the desktop Mega-Net ERP, BuildBuddy) and then other_product is its name; academy = Mega-Net Academy training; "
     "dev_services = having custom software built; partnership = a business partnership, reselling or collaboration; "
     "general = anything else (greetings, demo, pricing, thanks, what is Mega-Net Software). other_product is null "
-    "unless topic is other_product. Questions about those topics are covered by notes you may not see yet, so do not "
+    "unless topic is other_product. referrer_name / referrer_phone: only when the lead says someone referred or sent them "
+    "('John sent me', 'I was referred by Mr Okoro'); the person who referred them, never the lead; otherwise null. "
+    "Questions about those topics are covered by notes you may not see yet, so do not "
     "use the flag 'unanswered' only because the answer is not in front of you."
 )
 
@@ -214,6 +249,10 @@ def parse_classification(text):
     extra["topic"] = topic if topic in TOPICS else "general"
     if extra["topic"] == "other_product" and isinstance(other, str) and other.strip() and other.strip().lower() != "null":
         extra["other_product"] = other.strip()[:80]
+    for key, limit in (("referrer_name", 120), ("referrer_phone", 40)):
+        v = data.get(key)
+        if isinstance(v, str) and v.strip() and v.strip().lower() not in ("null", "none"):
+            extra[key] = " ".join(v.split())[:limit]
     return {
         **extra,
         "intent": intent if intent in INTENTS else "exploring",
@@ -316,7 +355,7 @@ def last_classify_info():
 
 
 def _classify_request(lead, messages, extra=""):
-    response = _get_client().messages.create(
+    response = _create(
         model=current_app.config["ANTHROPIC_MODEL"],
         max_tokens=CLASSIFY_MAX_TOKENS,
         system=_system(lead, CLASSIFY_INSTRUCTIONS + extra),
@@ -328,6 +367,8 @@ def _classify_request(lead, messages, extra=""):
         "stop_reason": getattr(response, "stop_reason", None),
         "input_tokens": getattr(usage, "input_tokens", None),
         "output_tokens": getattr(usage, "output_tokens", None),
+        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", None),
+        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", None),
         "text_len": len(text),
         "non_text_blocks": sorted({b.type for b in response.content if b.type != "text"}),
         "raw_text": text,
@@ -398,7 +439,9 @@ REPLY_RULES = (
     "AI, answer honestly that you are an AI assistant and that a member of the team follows up personally. Introduce "
     "yourself as the AI assistant only once, in the first message of the conversation, and never again.\n"
     "- Custom software requests are never promised: say the team assesses them. For Academy fees, dates and enrolment say "
-    "the team will confirm. Give no phone number, e-mail address or website link.\n"
+    "the team will confirm. Give no e-mail address or website. When asked how to contact the company, for a number, to "
+    "message a person or for a partner contact, give the official WhatsApp number and link from the business facts, exactly, "
+    "and no other number: never Fredrick's or the owner's.\n"
     "- If they ask to talk to a person, hand over warmly: say Fredrick or a member of the team will take over and reply "
     "personally; ask nothing more.\n"
     "- Never repeat your previous message, or any message you sent in the last day. Ask at most one or two questions.\n"
@@ -445,6 +488,15 @@ SITUATIONS = {
         "below as your base. It is the one reply allowed to be longer than 90 words, but never more than "
         f"{FIRST_REPLY_MAX_WORDS}. Do not offer a demo or video unless they asked."
     ),
+    "partner": (
+        "The lead asks about partnership or referrals. Follow the partnership notes: confirm the programme exists, give its "
+        "name, state the filled-in partnership facts in your own words, say Fredrick or a member of the team confirms the "
+        "full terms and onboards partners personally, and ask ONE short question: who they are and which organisations they "
+        "could introduce. Say the team will reply personally at the next business time from the office-hours status. For any "
+        "fact marked UNKNOWN say the team confirms it personally. Never promise acceptance, eligibility, a payout, a date or "
+        "any amount, and never work out a commission for a product or sale. If they say someone referred them, say only that "
+        "the team will note it."
+    ),
     "holding": (
         "A person (Fredrick or the team) is handling this conversation. Acknowledge the customer's latest message in one "
         "or two sentences and say Fredrick or a member of the team will reply personally soon. Do not answer product "
@@ -479,6 +531,8 @@ FALLBACK_REPLIES = {
                        "and come back to you."),
     "not_fit": "Understood, thanks for letting us know. If anything changes, message us any time.",
     "first_product_reply": "Thank you for your interest in Mega-Net. Could you tell me what type of business you run, and the biggest challenge you want the software to solve?",
+    "partner": ("Thank you for your interest in partnering with Mega-Net. Fredrick or a member of our team will reply "
+                "personally. Could you tell me briefly who you are and which organisations you could introduce?"),
     "holding": "Thank you for your message. Fredrick or a member of our team has it and will reply to you personally soon.",
     "support_route": ("Thank you for your message. Existing clients should contact their usual Mega-Net support "
                       "representative through their established support channel."),
@@ -512,7 +566,7 @@ def trim_to_sentence(text):
 
 
 def _generate(lead, messages, system_extra, max_tokens, user_extra="", topic=None):
-    response = _get_client().messages.create(
+    response = _create(
         model=current_app.config["ANTHROPIC_MODEL"],
         max_tokens=max_tokens,
         system=_system(lead, system_extra, topic),
@@ -596,6 +650,40 @@ def _not_repeat(text, messages):
     return FALLBACK_ALTERNATIVE if repeats(text, messages) and not repeats(FALLBACK_ALTERNATIVE, messages) else text
 
 
+# --- phone numbers: only the official number may be given ---------------------------------------------------------------
+
+_PHONE_RE = re.compile(r"(?<![\w/.])\+?\d[\d ()\-.]{6,}\d(?!\w)")
+_WAME_RE = re.compile(r"wa\.me/\+?(\d+)", re.I)
+
+
+def _tail(number):
+    """The last ten digits of a phone number, so +234 707 600 0030, 2347076000030 and 07076000030 compare equal."""
+    return re.sub(r"\D", "", str(number or ""))[-10:]
+
+
+def phone_numbers(text):
+    """Phone-number-like strings in a text (nine or more digits, so prices, times and dates are not counted)."""
+    return [m.group(0) for m in _PHONE_RE.finditer(text or "") if len(re.sub(r"\D", "", m.group(0))) >= 9]
+
+
+def foreign_numbers(text, allowed=()):
+    """Phone numbers (and wa.me links) in `text` that are not the official WhatsApp number and not in `allowed` (numbers the
+    customer wrote themselves). The owner's number is never allowed, even if the customer wrote it."""
+    owner = _tail(current_app.config.get("OWNER_WHATSAPP_NUMBER"))
+    ok = {_tail(business_facts.OFFICIAL_WHATSAPP_NUMBER)} | {_tail(a) for a in allowed if _tail(a)}
+    if owner and owner != _tail(business_facts.OFFICIAL_WHATSAPP_NUMBER):
+        ok.discard(owner)
+    found = [n for n in phone_numbers(text) if _tail(n) not in ok]
+    found += [m.group(0) for m in _WAME_RE.finditer(text or "") if _tail(m.group(1)) not in ok]
+    return found
+
+
+def safe_contact_reply():
+    """The reply sent when a draft kept giving a wrong number: the official contact, nothing else."""
+    return (f"You can reach the Mega-Net team on WhatsApp at {business_facts.OFFICIAL_WHATSAPP_NUMBER} "
+            f"({business_facts.OFFICIAL_WHATSAPP_LINK}). A member of the team also follows up personally.")
+
+
 # --- AI disclosure and honesty -----------------------------------------------------------------------------------------
 
 _ASKS_AI_RE = re.compile(
@@ -611,6 +699,14 @@ _HUMAN_CLAIM_RE = re.compile(
 _SAYS_AI_RE = re.compile(r"\bAI\b|artificial intelligence|\bbot\b|automated assistant", re.I)
 _SAYS_TEAM_RE = re.compile(r"\b(team|Fredrick|colleague|someone|member of)\b", re.I)
 _CONTACT_RE = re.compile(r"meganetsoftware|\.com\.ng\b", re.I)  # the company's own site or e-mail domain is never given out
+# promises the bot must never make about the referral partnership programme (partnership topic, or a lead with a referrer)
+_PARTNER_PROMISE_RE = re.compile(
+    r"\byou(?:'ll|\s+will|\s+are\s+going\s+to)\s+(?:be\s+(?:accepted|approved|eligible|a\s+partner|paid)|earn|get\s+paid)\b|"
+    r"\b(?:you\s+are|you're)\s+(?:now\s+)?(?:accepted|approved|eligible|a\s+partner|in\s+the\s+programme)\b|"
+    r"\bguarantee[sd]?\b[^.?!]{0,40}\b(?:commission|payout|payment)\b|"
+    r"\b(?:commission|payouts?)\s+(?:is|will\s+be|are)\s+(?:paid|due|owed|yours)\b|"
+    r"\b(?:referral|sale)\s+(?:is|has\s+been|was)\s+(?:valid|confirmed|accepted|approved|eligible)\b|"
+    r"\b\d+(?:\.\d+)?\s*%\s+of\s+(?:the\s+)?(?:price|sale|subscription|ERP|EHR|\w+\s+Cloud)\b", re.I)
 _COMPANY_INTRO_RE = re.compile(r"Mega-Net Software is a Nigerian software", re.I)
 _GREET_RE = re.compile(r"^\s*(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b[^.!?\n]{0,40}[!.,]\s*", re.I)
 
@@ -744,7 +840,8 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
     here: no prices, no 'confirmed' claims, no repeats, a sensible length, the AI disclosure once and never a claim to be
     human. `topic` (see TOPICS) picks which on-demand knowledge goes in the prompt. The result always has a 'reply';
     'fallback' is True when a fixed text had to be used (Claude failed or a guard required it), with the reason in 'error'."""
-    info = {"fallback": False, "error": None, "stop_reason": None, "usage": None, "retried": False, "topic": topic}
+    info = {"fallback": False, "error": None, "stop_reason": None, "usage": None, "retried": False, "topic": topic,
+            "max_tokens_hits": 0, "attempts": []}  # attempts: the usage of every request this draft made
     _local.info = info
     _local.topic = topic
     model = current_app.config["ANTHROPIC_MODEL"]
@@ -752,6 +849,12 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
     intro_needed = not ai_disclosed(messages)  # the very first bot message of the conversation says it is an AI
     asked_ai = asks_if_ai(" ".join(pending_inbound(messages)))
     name = getattr(lead, "name", None)
+    # numbers the customer wrote themselves (and their own WhatsApp number) may be repeated back; no others
+    customer_numbers = [getattr(lead, "phone", None)] + [n for m in messages if m.direction == "inbound"
+                                                          for n in phone_numbers(m.body)]
+
+    partner_context = (topic == "partnership" or situation == "partner"
+                       or bool(getattr(lead, "referrer_name", None) or getattr(lead, "referrer_phone", None)))
 
     def fall(reason):
         info.update(fallback=True, error=reason)
@@ -792,6 +895,14 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
         if not intro_needed and re.search(AI_INTRO_RE, text):
             problems.append(("intro", "Your last attempt introduced yourself again. You already said you are the AI "
                                       "assistant; never repeat the introduction."))
+        if partner_context and _PARTNER_PROMISE_RE.search(text):
+            problems.append(("promise", "Your last attempt promised or confirmed something about the partnership programme "
+                                        "(acceptance, eligibility, a payout, a valid referral, or a commission amount). "
+                                        "Only the team can; say the team confirms the details personally."))
+        if foreign_numbers(text, customer_numbers):
+            problems.append(("phone", "Your last attempt contained a phone number that is not the official WhatsApp number. "
+                                      "Remove every other number. Give only the official WhatsApp number from the business "
+                                      "facts, and only if the customer asked how to contact the company."))
         if _CONTACT_RE.search(text):
             problems.append(("contact", "Your last attempt gave a website or e-mail address. Give no contact details."))
         last = _last_bot_text(messages)
@@ -823,6 +934,9 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
         def gen(extra=""):
             raw, stop, usage = _generate(lead, messages, base + extra, REPLY_MAX_TOKENS, topic=topic)
             info.update(stop_reason=stop, usage=usage)
+            info["attempts"].append(usage)
+            if stop == "max_tokens":
+                info["max_tokens_hits"] += 1
             turn = parse_turn(raw) if structured else None
             if turn is None:
                 turn = blank_turn(raw)  # plain text: use it as the reply, with no signals
@@ -864,6 +978,8 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
                 log.warning("claude draft_reply still failed the guard (%s); using the fixed fallback text", kinds)
                 if any(p[0] == "price" for p in problems):  # a price slipped in: the safe pricing reply
                     nonlocal_fixed[0] = FALLBACK_REPLIES["ready"]
+                if any(p[0] == "phone" for p in problems) or foreign_numbers(t2, customer_numbers):
+                    nonlocal_fixed[0] = safe_contact_reply()  # a wrong number: only the official contact is sent
                 return fall(f"draft failed the {kinds} guard")
             turn = turn2
         log.info("claude draft_reply ok model=%s topic=%s chars=%d stop_reason=%s usage=%s", model, topic,

@@ -153,7 +153,7 @@ too (name, one question, within 165 words, the product's own link exactly as sto
 only).
 
 **Checking replies before you rely on them.** In the Render Shell run `python scripts/eval_replies.py` (needs
-`ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it). It runs 32 awkward
+`ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it). It runs 35 awkward
 customers (thanks plus price, a topic switch, a vague "ok", Pidgin, two questions at once, a Tuesday demo request, a
 complaint, a voice note, a request for a human, repeated questions, a long silence and more) through the real pipeline
 with the real Claude in dry-run mode, using a temporary database, so nothing is sent and nothing is stored. Each reply

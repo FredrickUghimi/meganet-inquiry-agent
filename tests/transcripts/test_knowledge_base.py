@@ -15,7 +15,7 @@ CORE_MARK = "BuildBuddy: Get senior-level coding guidance"
 OTHER_MARK = "Other Mega-Net applications"
 ACADEMY_MARK = "Mega-Net Academy provides practical technology education"
 DEV_MARK = "Mega-Net Software also undertakes software development"
-PARTNER_MARK = "Mega-Net Software has a referral partner programme"
+PARTNER_MARK = "Partnership and referral enquiries"
 EHR_MARK = "EHR Cloud knowledge:"
 ERP_MARK = "ERP Cloud knowledge:"
 SECTION_MARKS = (OTHER_MARK, ACADEMY_MARK, DEV_MARK, PARTNER_MARK)
@@ -273,7 +273,10 @@ def test_bizlens_and_the_daily_sales_report_answers_are_in_the_core_for_every_to
     for topic in (None, "erp", "academy", "other_product"):
         system = " ".join(ai.system_text(ai._system(Lead(product_interest="unsure"), "x", topic)).split())
         assert "Business Sentinel is built into Mega-Net ERP Cloud and is not sold separately" in system
-        assert "BizLens is its former name" in system
+        assert ("BizLens is now called Business Sentinel. It's a feature inside Mega-Net ERP Cloud that flags unusual items, "
+                "such as cash movements not tied to a transaction, or credit sales with no invoice or receipt. It isn't "
+                "sold separately.") in system
+        assert "ERP Cloud for a business or EHR Cloud for a clinic or hospital" in system
         assert "is no longer offered; say so, and that Mega-Net ERP Cloud is the current business management product" in system
 
 
@@ -334,7 +337,7 @@ def test_no_android_or_iphone_or_phone_claims_anywhere_customer_visible():
 def test_sentinels_are_rule_based_not_ai_detection():
     core = " ".join(knowledge_base.CORE.split())
     assert "five rule-based checks when a user presses Scan" in core
-    assert "rule-based detection; AI only writes the explanations, and only when the AI service is configured" in core
+    assert "rule-based detection; AI only writes the explanations, when the AI service is configured" in core
     for name, text in customer_visible_texts().items():
         assert not re.search(r"AI[- ]powered (detection|sentinel|fraud)|(detected|detects|found) by AI", text, re.I), name
         assert not re.search(r"(Business|Financial) Sentinel[^.]{0,60}\buses AI\b", text, re.I), name
@@ -372,14 +375,19 @@ PHONE = re.compile(r"(?<!\d)(?:\+?234|0)[789]\d{9}(?!\d)|\+\d[\d \-]{8,}\d|\b0[7
 LINK = re.compile(r"https?://|www\.|\b[\w-]+\.(?:com|ng|org|net|io|co|ng)\b|\b\w+@\w+\.\w+|youtu", re.I)
 
 
+def without_official(text):
+    """The official WhatsApp number and link are the only contact details allowed in customer-visible text."""
+    return text.replace(business_facts.OFFICIAL_WHATSAPP_NUMBER, "").replace(business_facts.OFFICIAL_WHATSAPP_LINK, "")
+
+
 def test_no_phone_number_email_or_link_in_any_customer_visible_text_or_prompt(app):
     for name, text in customer_visible_texts().items():
-        assert not PHONE.search(text) and not LINK.search(text.replace("{video_url}", "")), name
+        assert not PHONE.search(without_official(text)) and not LINK.search(without_official(text).replace("{video_url}", "")), name
     for product in ("ehr_cloud", "erp_cloud", "unsure"):
         for topic in ai.TOPICS + (None,):
-            text = ai.system_text(ai._system(Lead(product_interest=product), "x", topic))
+            text = without_official(ai.system_text(ai._system(Lead(product_interest=product), "x", topic)))
             assert not PHONE.search(text) and not LINK.search(text), (product, topic)
-    assert not PHONE.search(knowledge.first_reply_brief("ehr_cloud", "A")) and "youtu" not in knowledge.first_reply_brief("erp_cloud")
+    assert not PHONE.search(without_official(knowledge.first_reply_brief("ehr_cloud", "A"))) and "youtu" not in knowledge.first_reply_brief("erp_cloud")
     assert "meganetsoftware" not in (ROOT / "sentinel" / "knowledge_base.py").read_text().lower().replace("meganetsoftware|", "")
 
 
@@ -490,16 +498,3 @@ def test_the_token_report_runs_and_shows_the_tiered_prompt_is_cached(capsys):
     mod.main()
     out = capsys.readouterr().out
     assert "EHR Cloud lead, product question" in out and "unsure lead asks about the Academy" in out and "on cache hit" in out
-
-
-def test_referral_programme_is_described_but_never_decided_and_has_no_contacts(chat, cl):
-    text = " ".join(knowledge_base.PARTNERSHIP.split())
-    assert "20% commission on the eligible initial payment" in text
-    assert "never confirm that a particular person or sale is eligible" in text and "never promise a payout" in text
-    assert not PHONE.search(text) and not LINK.search(text) and "WhatsApp" not in text
-    assert knowledge_base.estimate_tokens(knowledge_base.PARTNERSHIP) < knowledge_base.SECTION_TOKEN_BUDGET
-    assert "20%" not in knowledge_base.CORE  # loaded only for the partnership topic
-    cl.classification.update(product="unsure", topic="partnership")
-    r = chat.say("Do you pay people who refer customers?", turn("Yes, there is a referral programme. The team will give you the details."))
-    assert "20% commission" in system_of(cl.calls[0]) and "referral" in r[0]
-    assert OpenQuestion.query.one().question.startswith("[Partnership]") and chat.owner_texts()

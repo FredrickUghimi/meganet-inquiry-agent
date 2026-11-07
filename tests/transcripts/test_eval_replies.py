@@ -35,7 +35,9 @@ def test_automatic_checks_catch_each_failure():
     assert "no repeated bot text" in failed(good, [good.replace("Which", "Which one")])
     assert "AI disclosure once, never repeated" in failed(good.replace("Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. ", ""))
     assert "AI disclosure once, never repeated" in failed(good, ["Hello! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Hi."])
-    assert "no phone number, e-mail or website link" in failed(good + " See www.example.com or call 08012345678.")
+    assert "no number, e-mail or website except the official WhatsApp contact" in failed(good + " See www.example.com or call 08012345678.")
+    assert "no number, e-mail or website except the official WhatsApp contact" not in failed(
+        good + f" Message us on {business_facts.OFFICIAL_WHATSAPP_NUMBER} ({business_facts.OFFICIAL_WHATSAPP_LINK}).")
     assert "no currency amounts" in failed("Wednesday works and it costs ₦500,000.")
     assert "no promises" in failed("Wednesday works, I guarantee it.")
     assert "no promises" in failed("Wednesday works and your demo is confirmed for 10:00.")
@@ -120,7 +122,7 @@ def test_first_reply_checks_catch_each_failure():
 
 def test_first_reply_scenarios_pass_end_to_end_in_dry_run_with_the_link_inserted_by_code(app, sent, cl, monkeypatch):
     monkeypatch.setattr(whatsapp, "_post", lambda payload: pytest.fail("eval must never send"))
-    strict = [s for s in ev.SCENARIOS if s.get("first_strict")]
+    strict = [s for s in ev.SCENARIOS if s.get("first_strict") or s.get("demo_first")]
     assert len(strict) == 3
     for sc in strict:  # Claude keeps the placeholder; the pipeline (dry run) inserts the exact link and records nothing
         cl.drafts.append(turn(knowledge.first_reply(sc["first_reply"], "Amaka")))
@@ -130,3 +132,66 @@ def test_first_reply_scenarios_pass_end_to_end_in_dry_run_with_the_link_inserted
     text = "\n".join(lines)
     assert business_facts.video_for("ehr_cloud")[1] in text and business_facts.video_for("erp_cloud")[1] in text
     assert "{video_url}" not in text and sent == []
+
+
+# --- the demo-request-first scenario, and the speed report --------------------------------------------------------------
+
+EHR_LINK = business_facts.video_for("ehr_cloud")[1]
+DEMO_FIRST = next(s for s in ev.SCENARIOS if s.get("demo_first"))
+SHORT_DEMO_REPLY = (f"Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant. Happy to show you Mega-Net EHR Cloud, our "
+                    f"cloud system for clinics and hospitals. Watch our product demonstration:\n{EHR_LINK}\n\n"
+                    f"We also hold personalised demos on Wednesdays at 10:00 AM (WAT). Is yours a clinic or a hospital?")
+
+
+def failed_for(sc, reply):
+    return {n for n, ok, _ in ev.check_reply(reply, sc, []) if not ok}
+
+
+def test_a_correct_short_reply_to_a_demo_request_passes_without_the_approved_sentences():
+    assert DEMO_FIRST["name"] == "first EHR reply, demo request as the first message"
+    assert "It combines" not in SHORT_DEMO_REPLY and knowledge.demo_line() not in SHORT_DEMO_REPLY
+    assert failed_for(DEMO_FIRST, SHORT_DEMO_REPLY) == set()
+
+
+def test_the_demo_first_checks_still_catch_a_wrong_link_a_missing_time_two_questions_or_length():
+    assert "own video link, exactly as stored" in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY.replace(EHR_LINK, EHR_LINK.split("?")[0]))
+    assert "Wednesday 10:00 demo offer" in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY.replace("Wednesdays at 10:00 AM (WAT)", "Wednesdays"))
+    assert "Wednesday 10:00 demo offer" in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY.replace("Wednesdays", "Fridays"))
+    assert "exactly one closing question" in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY + " And how many staff?")
+    assert "exactly one closing question" in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY.replace("Is yours a clinic or a hospital?", ""))
+    assert any(n.startswith("under") for n in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY + " word" * 200))
+    assert "only confirmed features" in failed_for(DEMO_FIRST, SHORT_DEMO_REPLY.replace("clinics", "clinics with branch management"))
+
+
+def test_the_strict_checks_stay_for_generic_interest_and_menu_taps():
+    strict = next(s for s in ev.SCENARIOS if s.get("first_strict") and s["first_reply"] == "ehr_cloud")
+    assert "approved feature sentence kept" in failed_for(strict, SHORT_DEMO_REPLY)
+    assert "Wednesday live-demo offer" in failed_for(strict, SHORT_DEMO_REPLY)
+
+
+def test_the_demo_first_scenario_runs_end_to_end_with_a_short_reply(app, sent, cl):
+    cl.drafts.append(turn(SHORT_DEMO_REPLY.replace(EHR_LINK, "{video_url}")))
+    lines = []
+    assert ev.evaluate(ev.make_eval_app(), [DEMO_FIRST], out=lines.append)[0] == 1, "\n".join(lines)
+
+
+def test_every_scenario_prints_seconds_and_tokens_and_the_run_ends_with_totals_and_a_hit_rate(app, sent, cl):
+    cl.drafts.append(turn(SHORT_DEMO_REPLY.replace(EHR_LINK, "{video_url}")))
+    lines = []
+    ev.evaluate(ev.make_eval_app(), [DEMO_FIRST], out=lines.append)
+    text = "\n".join(lines)
+    assert "speed:" in text and "classify in/out/cache-read" in text and "draft in/out/cache-read" in text
+    assert "max_tokens hits 0" in text and "SPEED:" in text and "average" in text and "cache hit rate" in text
+    assert "max_tokens retries 0" in text
+
+
+def test_summarise_counts_cache_hits_and_max_tokens_retries():
+    base = dict(seconds=4.0, classify_in=100, classify_out=50, classify_read=900, classify_write=0, draft_in=200, draft_out=120,
+                draft_read=1800, draft_write=0, draft_calls=1, max_tokens_hits=0, reply_chars=300, hidden_out_est=20)
+    slow = dict(base, seconds=10.0, max_tokens_hits=1, draft_out=1500, hidden_out_est=1400)
+    t = ev.summarise([base, slow])
+    assert t["scenarios"] == 2 and t["total_seconds"] == 14.0 and t["avg_seconds"] == 7.0 and t["max_seconds"] == 10.0
+    assert t["max_tokens_retries"] == 1 and t["hidden_out_est"] == 1420
+    assert t["cache_read_tokens"] == 5400 and t["input_tokens"] == 600
+    assert abs(t["cache_hit_rate"] - 5400 / 6000) < 1e-9
+    assert ev.summarise([]) == {"scenarios": 0}
