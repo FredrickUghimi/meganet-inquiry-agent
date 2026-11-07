@@ -15,7 +15,7 @@ CORE_MARK = "BuildBuddy: Get senior-level coding guidance"
 OTHER_MARK = "Other Mega-Net applications"
 ACADEMY_MARK = "Mega-Net Academy provides practical technology education"
 DEV_MARK = "Mega-Net Software also undertakes software development"
-PARTNER_MARK = "Business partnership enquiries"
+PARTNER_MARK = "Mega-Net Software has a referral partner programme"
 EHR_MARK = "EHR Cloud knowledge:"
 ERP_MARK = "ERP Cloud knowledge:"
 SECTION_MARKS = (OTHER_MARK, ACADEMY_MARK, DEV_MARK, PARTNER_MARK)
@@ -490,3 +490,16 @@ def test_the_token_report_runs_and_shows_the_tiered_prompt_is_cached(capsys):
     mod.main()
     out = capsys.readouterr().out
     assert "EHR Cloud lead, product question" in out and "unsure lead asks about the Academy" in out and "on cache hit" in out
+
+
+def test_referral_programme_is_described_but_never_decided_and_has_no_contacts(chat, cl):
+    text = " ".join(knowledge_base.PARTNERSHIP.split())
+    assert "20% commission on the eligible initial payment" in text
+    assert "never confirm that a particular person or sale is eligible" in text and "never promise a payout" in text
+    assert not PHONE.search(text) and not LINK.search(text) and "WhatsApp" not in text
+    assert knowledge_base.estimate_tokens(knowledge_base.PARTNERSHIP) < knowledge_base.SECTION_TOKEN_BUDGET
+    assert "20%" not in knowledge_base.CORE  # loaded only for the partnership topic
+    cl.classification.update(product="unsure", topic="partnership")
+    r = chat.say("Do you pay people who refer customers?", turn("Yes, there is a referral programme. The team will give you the details."))
+    assert "20% commission" in system_of(cl.calls[0]) and "referral" in r[0]
+    assert OpenQuestion.query.one().question.startswith("[Partnership]") and chat.owner_texts()

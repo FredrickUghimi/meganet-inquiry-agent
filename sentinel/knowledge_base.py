@@ -102,10 +102,17 @@ delivered by a date, or done for a cost, and never say it is free. Say plainly t
 question about what they need built, and let the owner follow up."""
 
 PARTNERSHIP = """\
-Business partnership enquiries (resellers, collaborations, referrals, joint work) are handled by Fredrick and the team, not \
-by you. Thank the person, ask them to say briefly who they are and what they have in mind, and say Fredrick or a member of \
-the team will reply personally. Do not agree to terms, discounts, exclusivity, commissions or any commitment, and do not \
-describe a partner programme: none is described to you. The owner is alerted automatically."""
+Mega-Net Software has a referral partner programme. The published offer: people who know business owners, hospitals, schools, \
+hotels, churches or other organisations can introduce them to Mega-Net Software. The referrer connects Mega-Net with potential \
+customers; Mega-Net provides the software demonstrations and sales support. When a referred customer makes a successful \
+purchase or subscription, the referrer earns 20% commission on the eligible initial payment. No software development skills \
+are needed.
+You may describe that offer in your own words when asked. You cannot decide anything about it: never confirm that a particular \
+person or sale is eligible, never promise a payout, a date, exclusivity or other terms, and never negotiate a different rate. \
+Say the team handles the details, ask the person to say briefly who they are and who they could introduce, and say Fredrick or a \
+member of the team will reply personally; the owner is alerted automatically. Other partnership enquiries (reselling, \
+collaboration, joint work) are handled the same way: no terms are described to you.
+The 20% belongs only to this referral offer: it is not a discount and is never offered to customers buying the software."""
 
 SECTIONS = {
     "other_product": ("Other Mega-Net applications", OTHER_PRODUCTS),

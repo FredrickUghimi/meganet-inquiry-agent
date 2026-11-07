@@ -123,7 +123,7 @@ SCENARIOS = FIRST_REPLY_SCENARIOS + [
          forbid=[r"I(?:'m| am) (?:a )?(?:real )?(?:human|person)"]),
     dict(name="partnership", lead=dict(product_interest="unsure", status="new"),
          history=[("in", "We would like to partner with Mega-Net and resell your software in Ghana", 0)],
-         expect=[r"Fredrick|team"], forbid=[r"commission|exclusive|agree"]),
+         expect=[r"Fredrick|team"], forbid=[r"exclusive|I agree|you will earn|guarantee|eligible for sure"]),
     dict(name="changes their mind", lead=dict(product_interest="ehr_cloud", status="engaged", demo_state="accepted"),
          history=[("in", "Yes I want the team demo", 2), ("out", "Great. What is your organisation called?", 1.9),
                   ("in", "Sorry, actually no, I will think about it first", 0)], expect=[r"no problem|of course|understand|fine|sure"]),
