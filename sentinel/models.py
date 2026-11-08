@@ -49,6 +49,9 @@ class Lead(db.Model):
     referrer_name = db.Column(db.String(120))  # who sent this lead to Mega-Net (said by the customer or set by the owner)
     referrer_phone = db.Column(db.String(40))
     partner_enquiry = db.Column(db.Boolean, nullable=False, default=False)  # asked about the referral partnership programme
+    last_question = db.Column(db.String(300))  # the last question the bot asked (not asked again until answered / two replies on)
+    last_question_age = db.Column(db.Integer, nullable=False, default=0)  # bot replies sent since that question
+    after_hours_note_at = db.Column(db.DateTime)  # when "Our team will reply personally from ..." was last added
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",

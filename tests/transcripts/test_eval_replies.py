@@ -48,7 +48,8 @@ def test_automatic_checks_catch_each_failure():
 
 def test_evaluate_runs_the_real_pipeline_in_dry_run_and_sends_and_stores_nothing(app, sent, cl, monkeypatch):
     monkeypatch.setattr(whatsapp, "_post", lambda payload: pytest.fail("eval must never send"))
-    cl.drafts.extend([turn("You're welcome! Pricing is tailored to your needs and shared personally by Fredrick.")] * len(ev.SCENARIOS))
+    drafts_needed = sum(len(sc.get("turns", [1])) for sc in ev.SCENARIOS)  # a multi-turn scenario drafts once per turn
+    cl.drafts.extend([turn("You're welcome! Pricing is tailored to your needs and shared personally by Fredrick.")] * (drafts_needed * 2))  # room for regenerations
     real_leads = Lead.query.count()
     lines = []
     eval_app = ev.make_eval_app()
@@ -57,7 +58,7 @@ def test_evaluate_runs_the_real_pipeline_in_dry_run_and_sends_and_stores_nothing
     assert total == len(ev.SCENARIOS) and passed < total  # a generic reply cannot satisfy every scenario
     summary = next(l for l in lines if "scenarios passed" in l)
     assert "FAIL: " in summary and lines[-1].startswith("     reply (first 300 characters)")  # FAILED SCENARIOS is last
-    assert len(cl.calls) == total  # Claude (mocked) was called once per scenario, for real, through the pipeline
+    assert len(cl.calls) >= drafts_needed  # Claude (mocked) drafted for every customer message, through the real pipeline
     assert sent == [] and Lead.query.count() == real_leads  # nothing sent, nothing stored in the app's database
     idx = [i for i, s in enumerate(ev.SCENARIOS, 1) if s["name"].startswith("thanks plus price")][0]
     assert f"[{idx:02d}] thanks plus price" in text and "You're welcome!" in text

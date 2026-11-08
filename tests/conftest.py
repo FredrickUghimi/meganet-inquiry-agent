@@ -10,6 +10,14 @@ from sentinel import ai, create_app, whatsapp
 from sentinel.models import db
 
 
+@pytest.fixture(autouse=True)
+def office_hours_by_default(monkeypatch):
+    """The after-hours note depends on the real clock, so tests run 'inside business hours' unless they say otherwise
+    (monkeypatch demo.office_open to a function returning False)."""
+    from sentinel import demo
+    monkeypatch.setattr(demo, "office_open", lambda now: True)
+
+
 @pytest.fixture
 def sent(monkeypatch):
     """Capture outbound WhatsApp traffic instead of calling Meta."""

@@ -293,7 +293,7 @@ def test_a_bizlens_or_daily_sales_report_question_is_answered_by_claude_not_a_fi
 
 
 def test_the_retired_name_appears_only_in_the_one_core_line_and_the_tests_and_eval():
-    allowed = {"sentinel/knowledge_base.py": 1, "scripts/eval_replies.py": 2}
+    allowed = {"sentinel/knowledge_base.py": 1, "scripts/eval_replies.py": 3}
     found = {}
     for path in list(ROOT.rglob("*.py")) + list(ROOT.rglob("*.md")) + list(ROOT.rglob("*.html")) + list(ROOT.rglob("*.yaml")):
         rel = path.relative_to(ROOT).as_posix()
@@ -411,8 +411,8 @@ def test_the_company_introduction_is_guidance_and_never_sent_twice_in_a_row(chat
                   turn("Mega-Net Software is a Nigerian software company that builds many things."),
                   turn("In short, we build EHR Cloud for clinics and ERP Cloud for businesses. Which one fits you?"))
     assert "Nigerian software" not in r2[0] and len(cl.calls) == 3
-    assert "do not introduce it again" in system_of(cl.calls[2]) or "do not do it again" in system_of(cl.calls[0])
-    assert "not a script" in knowledge_base.CORE and "do not do it again" in knowledge_base.CORE
+    assert "do not introduce it again" in system_of(cl.calls[2]) or "Never repeat the company introduction" in system_of(cl.calls[0])
+    assert "not a script" in knowledge_base.CORE and "Never repeat the company introduction" in knowledge_base.CORE
 
 
 # --- internal rules vs customer facts, and single-source operational facts ------------------------------------------------

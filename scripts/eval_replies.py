@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 from datetime import timedelta
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -182,6 +183,24 @@ SCENARIOS = FIRST_REPLY_SCENARIOS + [
     dict(name="asks for a contact number", lead=dict(product_interest="unsure", status="engaged"),
          history=[("in", "What number can I message to reach someone at Mega-Net?", 0)],
          expect=[r"707\D*600\D*0030|2347076000030"], forbid=[r"\b0[89]\d{9}\b"]),
+    # --- multi-turn: nothing repeats from one reply to the next, and the after-hours note only follows an escalation ---
+    dict(name="multi-turn partnership: no repeated closing question or note", lead=dict(product_interest="unsure", status="new"),
+         partner=True, history=[("in", "I know many hospital owners. Do you pay people who refer customers to you?", 0)],
+         turns=[dict(say="I know many hospital owners. Do you pay people who refer customers to you?", escalates=True,
+                     expect=[r"Referral Partnership Programme", r"20%"]),
+                dict(say="What happens if the customer gets a refund?", expect=[r"refund", r"policy|team"], informational=True),
+                dict(say="Do I earn again when my customer renews?", expect=[r"\bno\b|\bnot\b|nothing|once", r"renew|later"], informational=True),
+                dict(say="I used the Daily Sales Report before. Can I still get it?", expect=[r"no longer", r"ERP Cloud"],
+                     forbid=[r"won't be able to get|can't get|cannot get", r"separate setup", r"https?://"], informational=True)]),
+    dict(name="multi-turn product questions: informational answers carry no follow-up promise",
+         lead=dict(product_interest="ehr_cloud", status="engaged"), history=[("in", "Does EHR Cloud have a lab module?", 0)],
+         turns=[dict(say="Does EHR Cloud have a lab module?", expect=[r"lab"], informational=True),
+                dict(say="And a pharmacy module?", expect=[r"pharmacy"], informational=True),
+                dict(say="What roles can I give to my staff?", expect=[r"role|nurse|physician|front desk|admin"], informational=True)]),
+    dict(name="multi-turn complaint: the note follows the escalation once",
+         lead=dict(product_interest="ehr_cloud", status="engaged"), history=[("in", "Nobody called me back. This is poor service.", 0)],
+         turns=[dict(say="Nobody called me back. This is poor service.", escalates=True, expect=[r"sorry|apolog", r"team|Fredrick|look into"]),
+                dict(say="Fine. Meanwhile, does EHR Cloud do online booking?", expect=[r"book"], informational=True)]),
     dict(name="changes their mind", lead=dict(product_interest="ehr_cloud", status="engaged", demo_state="accepted"),
          history=[("in", "Yes I want the team demo", 2), ("out", "Great. What is your organisation called?", 1.9),
                   ("in", "Sorry, actually no, I will think about it first", 0)], expect=[r"no problem|no worries|of course|understand|fine|sure|okay|\bok\b|noted|thanks for letting|whenever|any time|anytime"]),
@@ -206,6 +225,8 @@ def check_reply(reply, scenario, prior_bot_texts):
         ("latest message addressed", all(re.search(p, answer, re.I | re.S) for p in scenario.get("expect", [r"."]))
          and not any(re.search(p, answer, re.I) for p in scenario.get("forbid", [])), ""),
     ]
+    if not first:  # the approved first reply has its own question rules
+        checks.append(("at most one question", ai.question_count(answer) <= 1, f"{ai.question_count(answer)} questions"))
     intros = len(re.findall(knowledge.AI_INTRO_RE, reply))
     checks.append(("AI disclosure once, never repeated",
                    intros == (0 if any(re.search(knowledge.AI_INTRO_RE, t) for t in prior_bot_texts) else 1),
@@ -253,6 +274,8 @@ def build_lead(scenario, n):
                                status="received" if direction == "in" else "sent", external_id=f"eval.{n}.{i}"))
     if lead.demo_state == "asked":
         lead.demo_offer_asked_at, lead.demo_offer_open = now - timedelta(hours=3), True
+    if scenario.get("note_hours_ago") is not None:  # the after-hours note was last added this long ago
+        lead.after_hours_note_at = now - timedelta(hours=scenario["note_hours_ago"])
     db.session.commit()
     return lead
 
@@ -334,6 +357,98 @@ def select_scenarios(spec):
     return [(n, sc) for n, sc in numbered if spec.lower() in sc["name"].lower()]
 
 
+NOTE_RE = re.compile(r"Our team will reply personally from \w+ at \d{1,2}:\d{2} (?:AM|PM) WAT\.")
+ESCALATION_ONLY = r"reply personally|will follow up|get back to you|be in touch"
+
+
+def conversation_checks(replies, turns):
+    """Checks across the replies of one conversation: [(check name, ok, detail)]. No sentence repeated across consecutive replies,
+    no question asked twice, and the after-hours note only on turns that escalate."""
+    bots = [SimpleNamespace(direction="outbound", status="sent", channel="whatsapp", sender=None, body=r) for r in replies]
+    repeated, same = [], []
+    for i in range(1, len(replies)):
+        dups = ai.repeated_sentences(NOTE_RE.sub("", replies[i]), bots[:i])  # safety sentences are exempt by design
+        if dups:
+            repeated.append(f"turn {i + 1}: {dups}")
+    asked = [(i + 1, q) for i, r in enumerate(replies) for q in ai.questions_in(NOTE_RE.sub("", r))]
+    for a in range(len(asked)):
+        for b in range(a + 1, len(asked)):
+            if asked[a][0] != asked[b][0] and ai.same_question(asked[a][1], asked[b][1]) and not ai.is_safety_sentence(asked[b][1]):
+                same.append(f"turn {asked[a][0]} and turn {asked[b][0]}: {asked[b][1]}")
+    notes = [i + 1 for i, r in enumerate(replies) if NOTE_RE.search(r)]
+    allowed = [i + 1 for i, t in enumerate(turns) if t.get("escalates")]
+    return [("no sentence repeated across consecutive replies", not repeated, "; ".join(repeated)),
+            ("no question asked twice in the conversation", not same, "; ".join(same)),
+            ("after-hours note only on turns that escalate", all(n in allowed for n in notes), f"note on turn(s) {notes}"),
+            ("after-hours note not repeated without a new escalation", len(notes) <= max(len(allowed), 1), f"note on turn(s) {notes}")]
+
+
+def run_conversation(sc, n):
+    """Run a multi-turn scenario: each customer message through the real pipeline in dry-run mode, with the earlier bot replies
+    (and the state the live app would have saved: the last question and when the note was last added) in front of it.
+    Returns [(reply, stats, outcome, reason)] per turn."""
+    history = list(sc.get("prior", []))
+    last_q, q_age, note_ago, results = None, 0, None, []
+    total = len(sc["turns"]) * 2
+    for i, t in enumerate(sc["turns"]):
+        spacing = 0.01 * (total - 2 * i)  # hours before the latest message; keeps the order and the 24-hour window
+        past = [(d, text, ago + spacing) for d, text, ago in history]
+        step = dict(name=f"{sc['name']} / turn {i + 1}", history=past + [("in", t["say"], 0)],
+                    lead=dict(sc["lead"], last_question=last_q, last_question_age=q_age,
+                              partner_enquiry=bool(sc.get("partner") and i > 0) or sc["lead"].get("partner_enquiry", False)),
+                    note_hours_ago=note_ago)
+        reply, outcome, reason = run_scenario(step, n * 20 + i)
+        results.append((reply, run_scenario.stats, outcome, reason))
+        if reply is None:
+            break
+        history = past + [("in", t["say"], 0.005), ("out", reply, 0.002)]
+        q = ai.last_question(NOTE_RE.sub("", reply))
+        last_q, q_age = (q, 0) if q else (last_q, q_age + 1 if last_q else 0)
+        if NOTE_RE.search(reply):
+            note_ago = 0.002
+        elif note_ago is not None:
+            note_ago += 0.01
+    return results
+
+
+def evaluate_conversation(sc, n, out, verbose):
+    """Print one multi-turn scenario. Returns (passed, stats list, failure entry or None)."""
+    out(f"\n[{n:02d}] {sc['name']}  ({len(sc['turns'])} turns)")
+    results = run_conversation(sc, n)
+    replies, stats, bad, first_bad_reply = [], [], [], ""
+    prior = [t for d, t, _ in sc.get("prior", []) if d == "out"]
+    for i, (t, (reply, st, outcome, reason)) in enumerate(zip(sc["turns"], results), 1):
+        stats.append(st)
+        out(f"  turn {i} customer: {t['say']}")
+        if reply is None:
+            out(f"    FAIL no reply drafted ({outcome}: {reason})")
+            bad.append(f"turn {i}: no reply drafted")
+            first_bad_reply = first_bad_reply or f"({outcome}: {reason})"
+            continue
+        turn_sc = dict(expect=t.get("expect", [r"."]), forbid=t.get("forbid", []) + (
+            [ESCALATION_ONLY] if t.get("informational") else []))
+        checks = check_reply(reply, turn_sc, prior + replies)
+        replies.append(reply)
+        out(f"    bot:      {reply}")
+        out(f"    speed:    {st['seconds']:.1f}s | draft in/out/cache-read {st['draft_in']}/{st['draft_out']}/{st['draft_read']} "
+            f"| max_tokens hits {st['max_tokens_hits']}")
+        for name, good, detail in checks:
+            if verbose or not good:
+                out(f"      {'ok  ' if good else 'FAIL'} {name} {detail}".rstrip())
+            if not good:
+                bad.append(f"turn {i}: {name}")
+                first_bad_reply = first_bad_reply or reply[:300]
+    if len(replies) == len(sc["turns"]):
+        for name, good, detail in conversation_checks(replies, sc["turns"]):
+            if verbose or not good:
+                out(f"    {'ok  ' if good else 'FAIL'} {name} {detail}".rstrip())
+            if not good:
+                bad.append(name)
+                first_bad_reply = first_bad_reply or replies[-1][:300]
+    out(f"  => {'PASS' if not bad else 'FAIL'}")
+    return not bad, stats, ((n, sc["name"], bad, first_bad_reply) if bad else None)
+
+
 def evaluate(app, scenarios, out=print, verbose=False, numbers=None):
     """Run the scenarios and print results. Returns (passed, total). Needs an app whose database is a throwaway.
     `numbers` gives each scenario its number in the full list (default 1, 2, 3...). The last thing printed, when anything
@@ -343,6 +458,13 @@ def evaluate(app, scenarios, out=print, verbose=False, numbers=None):
     failures = []  # (number, name, failed check names, the first 300 characters of the reply)
     with app.app_context():
         for n, sc in zip(numbers or range(1, len(scenarios) + 1), scenarios):
+            if "turns" in sc:
+                ok, conv_stats, failure = evaluate_conversation(sc, n, out, verbose)
+                passed += ok
+                stats.extend(conv_stats)
+                if failure:
+                    failures.append(failure)
+                continue
             prior = [t for d, t, _ in sc["history"] if d == "out"]
             reply, outcome, reason = run_scenario(sc, n)
             st = run_scenario.stats

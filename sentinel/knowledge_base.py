@@ -34,7 +34,7 @@ and AI practitioner with over two decades of software engineering experience. It
 healthcare organisations, schools and others, to solve real operational problems and give better information for decisions. \
 Expertise: software engineering, ERP, health records, automation, analytics, AI, training and support.
 
-Products and services (beyond these lines use the product knowledge given, or say the team will confirm):
+Products and services (beyond these lines: the product knowledge, or the team will confirm):
 - Mega-Net EHR Cloud: cloud electronic health records and hospital management for clinics, hospitals and healthcare \
 networks, used in a web browser. Financial Sentinel flags possible billing problems with rule-based detection; AI only \
 writes the explanations, when the AI service is configured.
@@ -53,14 +53,14 @@ single space (no multiple branches), and Business Sentinel runs five rule-based 
 - Mega-Net Academy: software engineering, data and AI training.
 - Software development services: custom projects, assessed by the technical team.
 
-Business Sentinel is built into Mega-Net ERP Cloud and is not sold separately. If asked about BizLens, answer in your own \
-words along these lines: "BizLens is now called Business Sentinel. It's a feature inside Mega-Net ERP Cloud that flags \
+Business Sentinel is built into Mega-Net ERP Cloud and is not sold separately. If asked about BizLens, answer along \
+these lines: "BizLens is now called Business Sentinel. It's a feature inside Mega-Net ERP Cloud that flags \
 unusual items, such as cash movements not tied to a transaction, or credit sales with no invoice or receipt. It isn't sold \
 separately." Then ask whether they are looking at ERP Cloud for a business or EHR Cloud for a clinic or hospital. \
-The Daily Sales Report is no longer offered; say that, then point to Mega-Net ERP Cloud as the current business management product.
+The Daily Sales Report is no longer offered; say that, then point to Mega-Net ERP Cloud as the current business management product. If you ask anything after that, ask only what kind of business they run and what they want to improve, or nothing.
 
-If asked what Mega-Net Software is, answer in your own words from the above and ask how you can help. If you introduced the \
-company in your last message, do not do it again; answer the new question."""
+If asked what Mega-Net Software is, answer in your own words from the above. Never repeat the company introduction; answer the \
+new question."""
 
 OTHER_PRODUCTS = """\
 Other Mega-Net applications (explain the general purpose only; detailed feature, price, availability or installation \
@@ -103,8 +103,8 @@ question about what they need built, and let the owner follow up."""
 
 PARTNERSHIP = """\
 Partnership and referral enquiries. Reply in your own words: confirm the programme, give its name, state the headline terms from \
-the facts below, and ask one short question (who they are and which organisations they could introduce). Say the team will reply \
-personally at the next business time. The owner is alerted automatically. Other partnerships (reselling, collaboration) have no \
+the facts below. Ask who they are and which organisations they could introduce only once; if already asked, answer and end \
+without a question. The owner is alerted automatically. Other partnerships (reselling, collaboration) have no \
 terms described to you: the team handles them."""
 
 SECTIONS = {

@@ -71,12 +71,20 @@ def rule_text():
 
 
 def hours_status(now_utc):
-    """One prompt line: the time and whether the team is in business hours, so replies say when the team will answer."""
+    """One prompt line: the time and whether the team is in business hours. Claude never states when the team will reply: the
+    system adds "Our team will reply personally from ..." itself, and only when a human follow-up is open (after_hours_note)."""
     now = now_local(now_utc)
     if in_business_hours(now):
-        return f"Now: {now:%A %H:%M} WAT, inside business hours ({bf.display('BUSINESS_HOURS')})."
-    return (f"Now: {now:%A %H:%M} WAT, OUTSIDE business hours ({bf.display('BUSINESS_HOURS')}). When you say the team "
-            f"will reply or confirm, say they will do so from {fmt_open(next_opening(now))}.")
+        return (f"Now: {now:%A %H:%M} WAT, inside business hours ({bf.display('BUSINESS_HOURS')}). Do not state or promise a "
+                f"response time; the system adds one when it is needed.")
+    return (f"Now: {now:%A %H:%M} WAT, OUTSIDE business hours ({bf.display('BUSINESS_HOURS')}). Do not write when the team will "
+            f"reply or confirm: the system adds that line itself, only when a person has to follow up.")
+
+
+def office_open(now):
+    """Whether the after-hours note is skipped because the team is in business hours. A separate name so that tests can fix the
+    clock for the note without changing what hours_status() and team_note() report for explicit times."""
+    return in_business_hours(now)
 
 
 def in_business_hours(now):
@@ -99,6 +107,21 @@ def next_opening(now):
 
 def fmt_open(dt):
     return f"{dt:%A} at {clock(dt.hour, dt.minute)} WAT"
+
+
+AFTER_HOURS_WINDOW = timedelta(hours=24)
+
+
+def after_hours_note(now_utc, last_note_at=None, new_escalation=False):
+    """'Our team will reply personally from Monday at 9:00 AM WAT.' or ''. The caller has already decided that the reply creates
+    or keeps an open human follow-up. Nothing outside business hours is promised inside them; the same lead is not told twice in
+    24 hours unless a new escalation happened since."""
+    now = now_local(now_utc)
+    if office_open(now):
+        return ""
+    if last_note_at is not None and now_utc - last_note_at < AFTER_HOURS_WINDOW and not new_escalation:
+        return ""
+    return f"Our team will reply personally from {fmt_open(next_opening(now))}."
 
 
 def team_note(now_utc):

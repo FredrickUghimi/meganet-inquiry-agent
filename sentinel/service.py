@@ -837,8 +837,6 @@ def apply_turn(lead, turn, pending, history, now, dry_run, say, situation=None):
         actions.append(f"pencilled:{pencilled:%Y-%m-%d}")
         if not re.search(r"pencil|not confirmed|tentative", reply, re.I):
             reply += f"\n\nI have pencilled in {demo.fmt(pencilled)}. It is not confirmed yet: the team will confirm it."
-        if demo.team_note(now) and not re.search(r"working hours|business hours", reply, re.I):
-            reply += demo.team_note(now)
     if sig == "asked_to_reschedule":
         actions.append("reschedule-requested")
     reply = sanitize_links(reply)
@@ -1233,6 +1231,7 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     topic, other_product = ai.resolve_topic(result, latest)
     say(f"topic={topic}" + (f" ({other_product})" if other_product else ""))
     referral_said = bool(result.get("referrer_name") or result.get("referrer_phone"))
+    partner_before = bool(lead.partner_enquiry)  # a partner enquiry is flagged and alerted once, not on every message
     if not dry_run:
         changed = False
         if topic == "partnership" and not lead.partner_enquiry:
@@ -1285,11 +1284,16 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     flag = result.get("flag")
     question = result.get("question") or latest
     t_flag, t_tag = ai.topic_flag(topic, latest)
+    if topic == "partnership" and partner_before:
+        t_flag = None
     if t_flag and flag in (None, "none", "unanswered", "custom_request"):  # these topics always go to a person
         flag, question = t_flag, f"[{t_tag}] {question}"
         say(f"topic {topic} is referred to the team with an owner alert")
     if flag and not dry_run:
         _record_open_question(lead, flag, question, newly_ready, say)
+    # a new escalation (an owner alert is raised or a person has to step in) vs a follow-up that is merely still open
+    escalation_new = bool(newly_ready or flag or (topic == "partnership" and not partner_before))
+    follow_up_open = escalation_new or topic == "partnership"
     if topic == "partnership" and flag in (None, "none", "unanswered", "custom_request"):
         situation = "partner"
     elif flag:
@@ -1341,11 +1345,30 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         if not turn.get("needs_human") and _is_repeat_question(lead, pending):
             turn = dict(turn, needs_human="loop: customer repeated the same question")
         text, actions = apply_turn(lead, turn, pending, history, now, dry_run, say, situation)
-        say(f"draft ready ({len(text)} chars)")
+        # "Our team will reply personally from <next business time>": only when this reply creates or keeps an open human
+        # follow-up, only outside business hours, and not twice in 24 hours unless a new escalation happened.
+        pencilled = any(a.startswith("pencilled") or a == "reschedule-requested" for a in actions)
+        escalated = escalation_new or bool(turn.get("needs_human")) or pencilled
+        note = demo.after_hours_note(now, lead.after_hours_note_at, escalated) if (
+            follow_up_open or escalated or turn.get("handover")) else ""
+        if note:
+            text = f"{text}\n\n{note}"
+        say(f"draft ready ({len(text)} chars); after-hours note={'yes' if note else 'no'}")
         say(f"drafted reply text: {text!r}", detail=True)
         if dry_run:
             return "skipped", "dry run: would send free-form text (pass --send to really send)"
         msg = send_whatsapp(lead, text=text)
+        if msg.status != "failed":
+            if note:
+                lead.after_hours_note_at = now
+            q = ai.last_question(text)  # remembered so the same question is not asked again until it is answered
+            if q:
+                lead.last_question, lead.last_question_age = q, 0
+            elif lead.last_question:
+                lead.last_question_age = (lead.last_question_age or 0) + 1
+                if turn.get("answered_last_question") is True:
+                    lead.last_question, lead.last_question_age = None, 0
+            db.session.commit()
         if msg.status != "failed" and turn.get("needs_human"):
             _escalate(lead, turn["needs_human"], turn.get("handover", False))
     elif first_contact and cfg_ack:

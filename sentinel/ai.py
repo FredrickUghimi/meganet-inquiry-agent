@@ -413,7 +413,8 @@ REPLY_RULES = (
     "Reply rules:\n"
     "- Read the WHOLE conversation first. Never ask for something the lead has already told you (staff or "
     "patient numbers, their problem, their name); use what they said instead.\n"
-    "- Answer the lead's latest question or request FIRST, then ask at most one or two short questions.\n"
+    "- Answer the lead's latest question or request FIRST. Ask at most ONE short question, and only if it helps: a reply that "
+    "fully answers the lead may end without a question.\n"
     "- If the lead mentions price, cost or a quote: about pricing say only the approved pricing policy from the "
     "business facts, then offer a short demo and ask for a preferred day and time, and ALSO answer any other "
     "question they asked in the same message. NEVER describe how pricing is determined or structured: do not mention "
@@ -428,7 +429,7 @@ REPLY_RULES = (
     "availability and any costs. Never promise it, a date or a price, never say reminders work today, and never say it "
     "does not exist. It is not part of ERP Cloud.\n"
     "- Answer the customer's LATEST message first, whatever it is. Acknowledge thanks briefly (\"You're welcome\"). "
-    "Answer EVERY question in it, in one reply. Add at most ONE next step. A message that does not answer your last "
+    "Answer EVERY question in it, in one reply. Add at most ONE next step, or none. A message that does not answer your last "
     "question (thanks, another question, small talk, an emoji) must not make you repeat that question.\n"
     "- Read short or messy replies in context: typos, Nigerian Pidgin (answer in simple clear English, light Pidgin is "
     "fine), \"ok\", \"yes\", \"1\", a thumbs-up, \"later\". If they switch product or topic, follow them. If they "
@@ -444,7 +445,7 @@ REPLY_RULES = (
     "and no other number: never Fredrick's or the owner's.\n"
     "- If they ask to talk to a person, hand over warmly: say Fredrick or a member of the team will take over and reply "
     "personally; ask nothing more.\n"
-    "- Never repeat your previous message, or any message you sent in the last day. Ask at most one or two questions.\n"
+    "- Never repeat your previous message, or any message you sent in the last day, and never repeat a sentence you used in your last three messages. Ask at most one question, and never ask again a question the lead has not answered.\n"
     "- Never say a demo day is full or taken because of another person's request; offer only the days you are given.\n"
     "- Plain text only, no markdown, no signature. About 90 words at most (only the first reply about a product may run to "
     f"{FIRST_REPLY_MAX_WORDS}). Never use the words comprehensive, 'entire operations' or all-in-one. Finish every sentence; "
@@ -454,13 +455,13 @@ REPLY_RULES = (
 SITUATIONS = {
     "first_contact": (
         "This is the lead's first contact. Write the reply: confirm you received their message; if it is not "
-        "already clear which product they mean, ask whether it is EHR Cloud or ERP Cloud; ask one or two "
-        "qualifying questions (size of the facility or business, and the main problem they want solved), but only "
-        "those they have not already answered. At most two questions in total."
+        "already clear which product they mean, ask whether it is EHR Cloud or ERP Cloud; ask one "
+        "qualifying question (size of the facility or business, and the main problem they want solved), but only "
+        "those they have not already answered. At most one question in total."
     ),
     "continue": (
         "Reply to the lead's latest message(s). Answer only from the product notes and product knowledge you were "
-        "given. Then ask at most one question that moves things forward (a preferred time for a demo with "
+        "given. Then, if it helps, ask one question that moves things forward (a preferred time for a demo with "
         "Fredrick is usually the best one)."
     ),
     "ready": (
@@ -493,8 +494,8 @@ SITUATIONS = {
         "name and state the headline terms from the partnership facts in your own words (what is earned and on what, that it is "
         "once, when it is earned, how and when it is paid, refunds, approved discounts and VAT). For finer points say the "
         "written partnership policy covers it and the team shares it with registered partners personally; never answer them. "
-        "Ask ONE short question: who they are and which organisations they could introduce. Say the team will reply personally "
-        "at the next business time from the office-hours status. Renewals and later subscription payments earn nothing. Never "
+        "Ask ONE short question only if you have not already asked it (who they are and which organisations they could "
+        "introduce); if you did, answer without a question. Do not say when the team will reply. Renewals and later subscription payments earn nothing. Never "
         "promise acceptance, never confirm that a person, organisation or sale qualifies, never write an amount or work out a "
         "commission for any product or customer, and never state how instalments are treated. If they say someone referred "
         "them, say only that the team will note it."
@@ -516,14 +517,13 @@ SITUATIONS = {
         "The lead just tapped a product on our welcome menu, so they have chosen the product already (see the "
         "conversation). Do not re-introduce Mega-Net and do not ask which product. Briefly say what that product is "
         "for, using only the product facts you were given, then ask the usual qualifying questions: roughly how big "
-        "their facility or business is, and the main problem they want solved. At most two questions."
+        "their facility or business is, and the main problem they want solved. At most one question."
     ),
 }
 
 FALLBACK_REPLIES = {
     "first_contact": ("Thanks for reaching out to Mega-Net. We have your message. Which product are you "
-                      "asking about, EHR Cloud or ERP Cloud? And roughly how big is your facility or business, "
-                      "and what is the main problem you want to fix?"),
+                      "asking about, EHR Cloud or ERP Cloud, and what is the main problem you want to fix?"),
     "continue": "Thanks, noted. Can you tell me a bit more about your setup and what you want to fix first?",
     "ready": (f"Thanks. {business_facts.PRICING_POLICY} A short demo is the best next step. What day and time would "
               "suit you?"),
@@ -834,6 +834,149 @@ def claims_recurring(text):
     return any(_RECURRING_CLAIM_RE.search(sn) and not _NEGATION_RE.search(sn) for sn in _SENTENCE_SPLIT.split(text or ""))
 
 
+QUESTION_QUIET_REPLIES = 2  # an unanswered question is not asked again in the next two bot replies
+
+
+# --- questions asked, response-time promises, and sentence-level repeats -------------------------------------------------------
+
+_OFFER_RE = re.compile(r"personali[sz]ed\s+(?:live\s+)?(?:demo|demonstration)", re.I)
+_STOPWORDS = frozenset("a an the and or of to in on for with is are do you your we our us it this that at be can could would will "
+                       "me my i they their them what which who how any some about so as if by from have has".split())
+
+
+def _sentences(text):
+    """Sentences of a reply, one per entry (lines and sentence ends both split), with blank entries dropped."""
+    return [sn.strip() for part in re.split(r"\n+", text or "") for sn in _SENTENCE_SPLIT.split(part) if sn.strip()]
+
+
+def questions_in(text):
+    """The question sentences of a reply (links removed), in order."""
+    clean = re.sub(r"(?:https?://|www\.)\S+", "", text or "")
+    return [sn for sn in _sentences(clean) if sn.endswith("?")]
+
+
+def last_question(text):
+    """The last question the reply asks, or None."""
+    found = questions_in(text)
+    return found[-1][:300] if found else None
+
+
+def _content_words(text):
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOPWORDS and len(w) > 2}
+
+
+def same_question(a, b):
+    """True if two questions ask the same thing, in the same or other words: similar wording, or mostly the same content words."""
+    if not a or not b:
+        return False
+    if difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio() >= 0.6:
+        return True
+    wa, wb = _content_words(a), _content_words(b)
+    return bool(wa and wb) and len(wa & wb) / len(wa | wb) >= 0.5
+
+
+# A reply may not promise a response time: the system adds "Our team will reply personally from ..." itself, when a person has to
+# follow up. The two approved promises (demo confirmation, complaint response) are business facts and stay allowed.
+_REPLY_TIME_RE = re.compile(
+    r"\b(?:team|Fredrick|someone|we)\b[^.?!]{0,60}\b(?:reply|respond|get\s+back|be\s+in\s+touch|contact\s+you|call\s+you|"
+    r"follow\s+up)\w*[^.?!]{0,40}\b(?:from\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|\d)|"
+    r"(?:on|by|at)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|\d)|tomorrow|tonight|today|"
+    r"within\s+(?:\d+|an?|one|two|three|a\s+few)\s+(?:\w+\s+)?(?:minutes?|hours?|days?)|next\s+business\s+(?:day|time)|"
+    r"first\s+thing|this\s+(?:morning|afternoon|evening))\b", re.I)
+
+
+def states_reply_time(text):
+    """True if the text promises when the team will reply, other than the approved demo-confirmation and complaint promises."""
+    approved = [business_facts.DEMO_CONFIRMATION_PROMISE, business_facts.COMPLAINT_RESPONSE_PROMISE]
+    for sn in _sentences(text):
+        if _REPLY_TIME_RE.search(sn) and not any(difflib.SequenceMatcher(None, _norm(sn), _norm(a)).ratio() > 0.8 for a in approved):
+            return True
+    return False
+
+
+# Sentences that MUST be allowed to repeat, because the customer may need the same safe wording again and a rewrite could
+# make it wrong. They are exempt from the sentence-level repeat guard. (Listed in the README and the final report.)
+SAFETY_SENTENCES = (
+    ("the official WhatsApp number or link", lambda sn: business_facts.OFFICIAL_WHATSAPP_NUMBER in sn
+        or business_facts.OFFICIAL_WHATSAPP_LINK in sn),
+    ("the honest 'I am an AI assistant, not a person' answer", lambda sn: bool(re.search(r"\bAI\b", sn) and re.search(
+        r"\b(?:not\s+a\s+(?:person|human)|assistant)\b", sn, re.I))),
+    ("the approved pricing sentence, the demo-confirmation and complaint promises, the support route and support hours, the demo "
+     "day line", lambda sn: _like_fact(sn, "PRICING_POLICY", "DEMO_CONFIRMATION_PROMISE", "COMPLAINT_RESPONSE_PROMISE",
+                                      "SUPPORT_ROUTE_FOR_EXISTING_CLIENTS", "SUPPORT_HOURS", "DEMO_DAYS_AND_HOURS")),
+    ("'not confirmed yet / pencilled in / subject to confirmation' about a demo", lambda sn: bool(re.search(
+        r"\bnot\s+(?:yet\s+)?confirmed\b|\bpencilled\b|\bsubject\s+to\s+confirmation\b|\buntil\s+the\s+team\s+confirms\b", sn, re.I))),
+    ("the SMS gateway stance", lambda sn: bool(re.search(r"\bSMS\b", sn) and re.search(r"gateway|not\s+active", sn, re.I))),
+    ("the partnership hand-over: the written policy covers it", lambda sn: bool(re.search(r"written\s+partnership\s+policy", sn, re.I))),
+    ("renewals and later payments earn no commission", lambda sn: bool(re.search(r"\brenewals?\b", sn, re.I)
+                                                                      and re.search(r"\bno\s+commission\b|\bearn\s+nothing\b", sn, re.I))),
+    ("the personalised-demo offer question (its own once-per-24-hours rule governs it)", lambda sn: bool(_OFFER_RE.search(sn))),
+    ("the 'custom work is assessed by the technical team' hand-over", lambda sn: bool(re.search(r"technical\s+team", sn, re.I)
+                                                                                     and re.search(r"assess", sn, re.I))),
+)
+
+
+def _like_fact(sentence, *names):
+    for name in names:
+        for fact_sentence in _sentences(str(business_facts.value(name))):
+            if difflib.SequenceMatcher(None, _norm(sentence), _norm(fact_sentence)).ratio() > 0.8:
+                return True
+    return False
+
+
+def is_safety_sentence(sentence):
+    return any(test(sentence) for _, test in SAFETY_SENTENCES)
+
+
+REPEAT_SENTENCE_WORDS = 6        # shorter sentences ("Thanks for asking.") may repeat
+REPEAT_SENTENCE_SIMILARITY = 0.9
+REPEAT_LOOKBACK = 3              # previous bot messages compared
+
+
+def _previous_bot_sentences(messages):
+    texts = [m.body for m in reversed(list(messages)) if m.direction == "outbound" and m.status != "failed"
+             and m.channel != "manual" and m.sender is None and m.body][:REPEAT_LOOKBACK]
+    return [_norm(sn) for t in texts for sn in _sentences(strip_intro(t)) if _norm(sn)]
+
+
+def repeated_sentences(text, messages):
+    """Sentences of `text` (not counting the one-time AI disclosure) of six or more words that appear verbatim, or with similarity
+    above 0.9, in any of the previous three bot messages. Safety sentences (SAFETY_SENTENCES) never count."""
+    previous = _previous_bot_sentences(messages)
+    found = []
+    for sn in _sentences(strip_intro(text)):
+        if len(sn.split()) < REPEAT_SENTENCE_WORDS or is_safety_sentence(sn):
+            continue
+        norm = _norm(sn)
+        if any(norm == p or difflib.SequenceMatcher(None, norm, p).ratio() > REPEAT_SENTENCE_SIMILARITY for p in previous):
+            found.append(sn)
+    return found
+
+
+def drop_repeated_sentences(text, messages):
+    """(new text, removed sentences). A repeated sentence is removed only when that leaves a complete reply: every removed
+    sentence is at the end of the reply (a closing question or sign-off) and at least eight words remain. Otherwise the
+    original text comes back with the repeated sentences listed, and the caller regenerates."""
+    dups = repeated_sentences(text, messages)
+    if not dups:
+        return text, []
+    sentences = _sentences(text)
+    trailing = 0
+    for sn in reversed(sentences):
+        if sn in dups:
+            trailing += 1
+        else:
+            break
+    kept = [sn for sn in sentences if sn not in dups]
+    if trailing != sum(1 for sn in sentences if sn in dups) or sum(len(sn.split()) for sn in kept) < 8:
+        return text, dups
+    out = text
+    for sn in dups:
+        out = out.replace(sn, "", 1)
+    out = re.sub(r"[ \t]+\n", "\n", re.sub(r"[ \t]{2,}", " ", out))
+    return re.sub(r"\n{3,}", "\n\n", out).strip(), dups
+
+
 def strip_intro(text):
     """The reply without the one-time AI-disclosure opener ('Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI
     assistant.'), for checks that must read what the reply says about the customer's question."""
@@ -900,7 +1043,8 @@ TURN_SPEC = (
     'declined_personalised|gave_details|proposed_time|asked_to_reschedule", "proposed_time": "<the concrete day and '
     'time the customer chose or agreed to, e.g. Wednesday 11 November 10:00, else null>", "fields": {"name": null, '
     '"organisation": null, "phone": null, "channel": "whatsapp|meet|null"}, "share_video": "ehr_cloud|erp_cloud|both|'
-    'null", "asked_personalised_offer": true|false, "needs_human": "<short reason, or null>", "handover": true|false}\n'
+    'null", "asked_personalised_offer": true|false, "needs_human": "<short reason, or null>", "handover": true|false, '
+    '"answered_last_question": true|false|null}\n'
     "demo_signal is what the CUSTOMER'S latest message did, read in context: wants_demo = asks for or agrees to see a "
     "demo; accepted_personalised = says yes to a personalised demo with the team (including a bare 'yes' or 'ok' to your "
     "question); declined_personalised = says no or not now; gave_details = gave their name, organisation, phone or "
@@ -912,7 +1056,9 @@ TURN_SPEC = (
     "asked_personalised_offer: true only if your reply asks whether they want a personalised demo with the team.\n"
     "needs_human: a short reason ONLY if a person must step in (a complaint, a request for something you cannot decide, "
     "the customer repeating the same question, or asking for a person); handover: true only if they asked to talk to a "
-    "person. Otherwise null / false."
+    "person. Otherwise null / false.\n"
+    "answered_last_question: true if the customer's latest message answers the last question you asked them (given above), false "
+    "if it does not, null if you asked none."
 )
 
 _CONFIRMED_RE = re.compile(r"\b(is|are|has been|have been|now|been|all)\s+(confirmed|booked|scheduled|locked in)\b|"
@@ -958,6 +1104,7 @@ def parse_turn(text):
                 "asked_personalised_offer": obj.get("asked_personalised_offer") is True,
                 "needs_human": clean(obj.get("needs_human"), 200),
                 "handover": obj.get("handover") is True,
+                "answered_last_question": obj.get("answered_last_question") if isinstance(obj.get("answered_last_question"), bool) else None,
             }
     return None
 
@@ -965,7 +1112,7 @@ def parse_turn(text):
 def blank_turn(reply):
     return {"reply": reply, "demo_signal": "none", "proposed_time": None,
             "fields": {"name": None, "organisation": None, "phone": None, "channel": None}, "share_video": None,
-            "asked_personalised_offer": False, "needs_human": None, "handover": False}
+            "asked_personalised_offer": False, "needs_human": None, "handover": False, "answered_last_question": None}
 
 
 def draft_turn(lead, messages, situation, context="", fallback_text=None, structured=True, topic=None):
@@ -999,9 +1146,30 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             text = with_intro(text, name)
         return dict(blank_turn(_not_repeat(text, messages)), fallback=True, error=reason)
 
-    def check(text, stop):
-        """The guard problems of one draft: [(kind, instruction for Claude)]."""
+    pending_q = getattr(lead, "last_question", None) if (getattr(lead, "last_question_age", 0) or 0) < QUESTION_QUIET_REPLIES else None
+    if pending_q and _OFFER_RE.search(pending_q):
+        pending_q = None  # the personalised-demo offer has its own once-per-24-hours rule
+    free_text = situation not in ("first_product_reply", "holding", "support_route", "other_choice")
+
+    def check(text, stop, answered=None):
+        """The guard problems of one draft: [(kind, instruction for Claude)]. `answered` is the draft's own
+        answered_last_question signal (False = the customer did not answer the last question)."""
         problems = []
+        if question_count(text) > 1 and situation != "first_product_reply":
+            problems.append(("questions", "Your last attempt asked more than one question. Ask at most one, and none if the "
+                                          "customer is fully answered."))
+        if pending_q and answered is False and any(same_question(q, pending_q) for q in questions_in(text)):
+            problems.append(("repeat_question", f"Your last attempt asked again a question the customer has not answered "
+                                                 f"(\"{pending_q}\"). Do not ask it again, or the same thing in other words. "
+                                                 f"Answer the customer's new message and end without a question, or with a "
+                                                 f"different relevant one."))
+        if free_text and states_reply_time(text):
+            problems.append(("reply_time", "Your last attempt said when the team will reply. Do not state or promise a response "
+                                           "time: the system adds it when a person has to follow up."))
+        if free_text and repeated_sentences(text, messages):
+            problems.append(("repeated_sentence", "Your last attempt repeated a sentence you used in one of your last three "
+                                                  "messages. Say something new that answers the customer's latest message, "
+                                                  "and do not repeat earlier sentences or closing questions."))
         if _PRICE_RE.search(text):
             problems.append(("price", "Your last attempt contained a price or money amount, which is forbidden. Write it "
                                       "again with no amounts and no pricing details."))
@@ -1086,6 +1254,10 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             intro = "Keep the opening sentences of the approved reply exactly as written: they say you are the AI assistant."
         else:
             intro = "You have already introduced yourself as the AI assistant. Do not introduce yourself again."
+        if pending_q:
+            intro += (f"\nThe last question you asked, which may be unanswered: \"{pending_q}\". Do not ask it again, or the "
+                      f"same thing in other words, until the customer answers it; answer their new message and end without a "
+                      f"question, or ask a different relevant one.")
         base = (head + REPLY_RULES + "\n" + SITUATIONS[situation] + "\n" + intro + "\n" + who
                 + (("\n" + context) if context else "")
                 + ("\n" + TURN_SPEC if structured else "\nOutput only the message itself."))
@@ -1124,15 +1296,24 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
         if intro_needed:  # the disclosure is a requirement, not a style choice: add it if Claude left it out
             turn["reply"] = text = with_intro(text, name)
 
-        problems = [p for p in check(text, None)]
+        if free_text:  # a repeated closing question or sign-off is removed when the reply stays complete
+            trimmed, removed = drop_repeated_sentences(text, messages)
+            if removed and trimmed != text:
+                log.info("claude draft_reply: removed %d repeated sentence(s) from the end of the reply", len(removed))
+                turn["reply"] = text = trimmed
+        problems = [p for p in check(text, None, turn.get("answered_last_question"))]
         if problems:
             log.warning("claude draft_reply failed a guard (%s); regenerating once", ",".join(p[0] for p in problems))
             info["retried"] = True
             turn2, stop2 = gen("\n" + " ".join(p[1] for p in problems))
             if intro_needed and turn2["reply"]:
                 turn2["reply"] = with_intro(turn2["reply"], name)
+            if free_text and turn2["reply"]:
+                trimmed2, removed2 = drop_repeated_sentences(turn2["reply"], messages)
+                if removed2 and trimmed2 != turn2["reply"]:
+                    turn2["reply"] = trimmed2
             t2 = turn2["reply"]
-            if not t2 or check(t2, stop2):
+            if not t2 or check(t2, stop2, turn2.get("answered_last_question")):
                 kinds = ",".join(p[0] for p in problems)
                 log.warning("claude draft_reply still failed the guard (%s); using the fixed fallback text", kinds)
                 if any(p[0] == "price" for p in problems):  # a price slipped in: the safe pricing reply
