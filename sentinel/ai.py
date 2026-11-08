@@ -490,13 +490,14 @@ SITUATIONS = {
     ),
     "partner": (
         "The lead asks about partnership or referrals. Follow the partnership notes: confirm the programme exists, give its "
-        "name, state the filled-in partnership facts in your own words, say Fredrick or a member of the team confirms the "
-        "full terms and onboards partners personally, and ask ONE short question: who they are and which organisations they "
-        "could introduce. Say the team will reply personally at the next business time from the office-hours status. For any "
-        "fact marked UNKNOWN (payout timing or method, refunds, tax and discounts, credit rules, tracking) say the team confirms "
-        "it personally. If asked about renewals or later payments, say the commission is paid once and renewals earn nothing. "
-        "Never promise acceptance or eligibility, never confirm a person or a sale, and never work out a commission for any "
-        "product or customer. If they say someone referred them, say only that the team will note it."
+        "name and state the headline terms from the partnership facts in your own words (what is earned and on what, that it is "
+        "once, when it is earned, how and when it is paid, refunds, approved discounts and VAT). For finer points say the "
+        "written partnership policy covers it and the team shares it with registered partners personally; never answer them. "
+        "Ask ONE short question: who they are and which organisations they could introduce. Say the team will reply personally "
+        "at the next business time from the office-hours status. Renewals and later subscription payments earn nothing. Never "
+        "promise acceptance, never confirm that a person, organisation or sale qualifies, never write an amount or work out a "
+        "commission for any product or customer, and never state how instalments are treated. If they say someone referred "
+        "them, say only that the team will note it."
     ),
     "holding": (
         "A person (Fredrick or the team) is handling this conversation. Acknowledge the customer's latest message in one "
@@ -700,73 +701,137 @@ _HUMAN_CLAIM_RE = re.compile(
 _SAYS_AI_RE = re.compile(r"\bAI\b|artificial intelligence|\bbot\b|automated assistant", re.I)
 _SAYS_TEAM_RE = re.compile(r"\b(team|Fredrick|colleague|someone|member of)\b", re.I)
 _CONTACT_RE = re.compile(r"meganetsoftware|\.com\.ng\b", re.I)  # the company's own site or e-mail domain is never given out
-# promises the bot must never make about the referral partnership programme (partnership topic, or a lead with a referrer)
+# --- the referral partnership programme: what a draft may and may not say --------------------------------------------------
+# A statement that matches a filled-in constant in business_facts.py is allowed; one that does not, or that touches a TODO fact, is
+# regenerated. Sentences that hand the point to the team / the written policy are never claims.
 _PARTNER_PROMISE_RE = re.compile(
-    r"\byou(?:'ll|\s+will|\s+are\s+going\s+to)\s+(?:be\s+(?:accepted|approved|eligible|a\s+partner|paid)|get\s+paid)\b|"
+    r"\byou(?:'ll|\s+will|\s+are\s+going\s+to)\s+be\s+(?:accepted|approved|eligible|a\s+partner)\b|"
     r"\b(?:you\s+are|you're)\s+(?:now\s+)?(?:accepted|approved|eligible|a\s+partner|in\s+the\s+programme)\b|"
     r"\bguarantee[sd]?\b[^.?!]{0,40}\b(?:commission|payout|payment)\b|"
-    r"\b(?:commission|payouts?)\s+(?:is|will\s+be|are)\s+(?:due|owed|yours|paid\s+(?:within|after|every|monthly|weekly|daily|by|on\s+the|via|through|into|to\s+your|in\s+cash))\b|"
-    r"\b(?:referral|sale)\s+(?:is|has\s+been|was)\s+(?:valid|confirmed|accepted|approved|eligible)\b|"
-    r"\b\d+(?:\.\d+)?\s*%\s+of\s+(?:the\s+)?(?:price|sale|subscription|ERP|EHR|\w+\s+Cloud)\b", re.I)
-# A positive claim that renewals or later payments earn commission. A sentence that denies it ("no recurring payments",
-# "renewals earn nothing") is fine, so sentences with a negation are skipped.
+    r"\b(?:commission|payouts?)\s+(?:is|will\s+be|are)\s+(?:due|owed|yours)\b|"
+    r"\b(?:paid|payout)\b[^.?!]{0,30}\b(?:on\s+the\s+\d|by\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+week|"
+    r"tomorrow|the\s+\d)|next\s+(?:week|month)|this\s+(?:week|month)|tomorrow)\b|"
+    r"\b(?:referral|sale)\s+(?:is|has\s+been|was)\s+(?:valid(?!\s+for\s+\d)|confirmed|accepted|approved|eligible)\b|"
+    r"\b\d+(?:\.\d+)?\s*%\s+of\s+(?:the\s+)?(?:price|sale|ERP|EHR|\w+\s+Cloud)\b", re.I)
+# A positive claim that renewals or later payments earn commission. A sentence that denies it is fine (negation words).
 _RECURRING_CLAIM_RE = re.compile(
-    r"\b(?:earn|earns|get|gets|receive|receives|paid|pay|payable)\b[^.?!]{0,50}\b(?:renewals?|recurring|later\s+payments?|"
-    r"every\s+(?:payment|month|year|renewal)|each\s+(?:payment|month|year|renewal)|monthly)\b|"
-    r"\b(?:renewals?|recurring|later\s+payments?)\b[^.?!]{0,30}\b(?:also\s+)?(?:earn|count|qualify|pay|are\s+paid)\b", re.I)
+    r"\b(?:earn|earns|get|gets|receive|receives)\b[^.?!]{0,50}\b(?:renewals?|recurring|later\s+(?:subscription\s+)?payments?|"
+    r"every\s+(?:payment|renewal)|each\s+(?:payment|renewal)|(?:every|each)\s+month\s+the\s+customer)\b|"
+    r"\b(?:renewals?|recurring|later\s+(?:subscription\s+)?payments?)\b[^.?!]{0,30}\b(?:also\s+)?(?:earn|count|qualify|are\s+paid)\b", re.I)
 _NEGATION_RE = re.compile(r"\b(?:no|not|never|nothing|none|isn't|aren't|doesn't|don't|won't|cannot|can't|without|only)\b|n't", re.I)
 # The retired report: "no longer offered", then point to ERP Cloud. Never "you won't be able to get it".
 _CANNOT_GET_RE = re.compile(r"\b(?:won't|will\s+not|can't|cannot|unable\s+to|not\s+able\s+to)\s+(?:be\s+able\s+to\s+)?(?:get|buy|have|obtain|access|use)\b",
                             re.I)
 _RETIRED_REPORT_RE = re.compile(r"daily\s+sales", re.I)
 
-
-# Terms of the partnership programme that are still TODO in business_facts.py. A draft that states one of them as fact is
-# making it up; the bot says the team confirms it personally. Sentences with a negation or a hand-over are not claims.
-_UNDEFINED_TERM_RES = (
-    ("PARTNERSHIP_PAYOUT_TIMING", re.compile(r"\bwithin\s+\d+\s+(?:hours?|days?|weeks?|months?)\b|\b(?:same|next)\s+day\b|"
-                                              r"\bend\s+of\s+(?:the\s+)?(?:week|month)\b|\b(?:weekly|monthly|fortnightly)\b", re.I)),
-    ("PARTNERSHIP_PAYOUT_METHOD", re.compile(r"\b(?:bank\s+transfer|wire|cash|mobile\s+money|paystack|flutterwave|wallet|cheque|"
-                                              r"direct\s+deposit|into\s+your\s+(?:bank\s+)?account)\b", re.I)),
-    ("PARTNERSHIP_REFUNDS", re.compile(r"\brefund\w*[^.?!]{0,60}\b(?:commission|deduct\w*|claw\w*|forfeit\w*|lose|reversed)\b|"
-                                        r"\b(?:commission|deduct\w*|claw\w*)\b[^.?!]{0,60}\brefund\w*", re.I)),
-    ("PARTNERSHIP_TAX_AND_DISCOUNTS", re.compile(r"\b(?:before|after|net\s+of|excluding|including)\s+(?:tax|vat|discounts?)\b|"
-                                                  r"\btax[- ]?(?:inclusive|exclusive)\b", re.I)),
-    ("PARTNERSHIP_CREDIT_RULES", re.compile(r"\b(?:first|earliest)\s+(?:person\s+)?(?:to\s+)?(?:claim|register|refer|introduce)\w*|"
-                                             r"\bcredit\b[^.?!]{0,40}\b(?:goes\s+to|given\s+to|shared|split)\b", re.I)),
-)
-_HAND_OVER_RE = re.compile(r"\b(?:team|Fredrick|confirm\w*|whether|depends?)\b", re.I)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_HAND_OVER_RE = re.compile(r"\b(?:team|Fredrick|confirm\w*|whether|depends?|policy|policies)\b", re.I)
+_MONEYISH_RE = re.compile(r"\b(?:paid|payouts?|commissions?|earn|earns|earned)\b", re.I)
+_PAYOUT_SENTENCE_RE = re.compile(r"\b(?:paid|payouts?|pay(?:s|ing)?\s+(?:you|partners?|commissions?|out))\b", re.I)
+_PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
+_TIMING_RE = re.compile(r"\b\d+\s+(?:business\s+|working\s+|calendar\s+)?(?:days?|weeks?|months?|hours?)\b|"
+                        r"\b(?:weekly|fortnightly|bi-?weekly|quarterly|daily|annually|yearly|monthly)\b", re.I)
+_METHOD_RE = re.compile(r"\b(?:bank\s+transfer|wire\s+transfer|cash|mobile\s+money|paystack|flutterwave|opay|palmpay|wallet|cheque|"
+                        r"direct\s+deposit|crypto\w*|western\s+union|paypal)\b", re.I)
+_REFUND_ANY_RE = re.compile(r"\brefund\w*[^.?!]{0,60}\b(?:commission|deduct\w*|claw\w*|forfeit\w*|lose|reversed)\b|"
+                            r"\b(?:commission|deduct\w*|claw\w*)\b[^.?!]{0,60}\brefund\w*", re.I)
+_REFUND_WRONG_RE = re.compile(r"\b(?:keep|retain|still\s+(?:earn|get|receive|be\s+paid|paid|count)|unaffected|no\s+effect|not\s+affected)"
+                              r"[^.?!]{0,50}\brefund\w*|\brefund\w*[^.?!]{0,50}\b(?:still\s+(?:earn|get|receive|paid|count)|keep|retain|unaffected|no\s+effect)\b",
+                              re.I)
+_TAX_ANY_RE = re.compile(r"\b(?:before|after|net\s+of|excluding|including)\s+(?:tax|taxes|vat|discounts?)\b|\btax[- ]?(?:inclusive|exclusive)\b", re.I)
+_TAX_WRONG_RE = re.compile(r"\b(?:after|net\s+of)\s+(?:the\s+partner'?s\s+)?(?:tax|taxes|vat)\b|\btax[- ]?inclusive\b|"
+                           r"\b(?:including|inclusive\s+of|plus)\s+vat\b|\bvat\s+(?:is\s+)?included\b|\bwithholding\s+tax\s+of\s+\d", re.I)
+_CREDIT_RE = re.compile(r"\b(?:first|earliest)\s+(?:person\s+)?(?:to\s+)?(?:claim|register|refer|introduce)\w*|"
+                        r"\bcredit\b[^.?!]{0,40}\b(?:goes\s+to|given\s+to|shared|split|belongs)\b|"
+                        r"\bshar\w+\s+(?:the\s+)?(?:credit|commission)\b|\b(?:credit|commission)\s+(?:is\s+)?(?:split|shared)\b", re.I)
+_REGISTRATION_RE = re.compile(r"\b(?:register|registers|registering|submit|submits|submitting|log|logs)\s+(?:the\s+|your\s+|a\s+)?referrals?\b|"
+                              r"\breferral\s+(?:form|code|link|portal|number)\b|\bthrough\s+the\s+(?:portal|app|dashboard|form)\b", re.I)
+_VALIDITY_RE = re.compile(r"\bvalid\s+for\s+\d|\b\d+\s+(?:days|weeks|months|years)\b[^.?!]{0,40}\breferral|"
+                          r"\breferrals?\b[^.?!]{0,40}\b(?:expires?|expired|lapses?|lasts?|stays?\s+valid)\b", re.I)
+_SELF_REFERRAL_RE = re.compile(r"\bself[- ]?referr\w*|\brefer\s+(?:yourself|your\s+own|their\s+own|your\s+company|your\s+organi[sz]ation)\b|"
+                               r"\b(?:staff|employees?|partners?|you)\s+(?:can|may|cannot|can't|may\s+not|are\s+not\s+allowed\s+to|are\s+allowed\s+to)\s+refer\b", re.I)
+_INSTALMENT_RE = re.compile(r"\binstal+ments?\b|\bin\s+(?:parts|stages)\b|\bpart[- ]?payments?\b|\bpartial\s+payments?\b|"
+                            r"\bpaid\s+in\s+(?:parts|stages)\b", re.I)
+_AMOUNT_RE = re.compile(r"(?:₦|\$|€|£|\bNGN\s?|\bUSD\s?|\bN)\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:naira|dollars?|usd|ngn|k|million|thousand)\b", re.I)
 _ELIGIBILITY_CLAIM_RE = re.compile(
     r"\b(?:qualif(?:y|ies|ied)|is\s+eligible|are\s+eligible|counts?\s+as\s+(?:a\s+)?(?:valid\s+)?referral)\b|"
     r"\byou(?:'ll|\s+will)\s+(?:get|receive)\s+(?:your|the)\s+(?:20%|commission)\b", re.I)
+# Each term's constant and how a claim is judged: "match" = allowed when it appears in the filled-in constant; "todo" = any claim is
+# invented while the constant is TODO.
+_TODO_ONLY_TERMS = (("PARTNERSHIP_CREDIT_RULES", _CREDIT_RE), ("PARTNERSHIP_REGISTRATION", _REGISTRATION_RE),
+                    ("PARTNERSHIP_REFERRAL_VALIDITY", _VALIDITY_RE), ("PARTNERSHIP_SELF_REFERRALS", _SELF_REFERRAL_RE))
 
 
-def undefined_terms(text):
-    """Names of partnership facts that are still TODO but that `text` states as fact (a payout time, a method, a refund
-    rule, tax treatment, credit rule). A sentence that denies or hands over to the team is not a claim."""
+def _norm_term(text):
+    text = re.sub(r"\s+", " ", (text or "").lower()).replace("working", "business").replace("calendar ", "")
+    return re.sub(r"\b(days|weeks|months|hours)\b", lambda m: m.group(1)[:-1], text)
+
+
+def _fact(name):
+    """The lower-case text of a partnership constant, or '' while it is TODO."""
+    return "" if business_facts.is_todo(name) else str(business_facts.value(name)).lower()
+
+
+def unsupported_terms(text):
+    """Partnership facts that `text` states in a way the filled-in constants do not support: a rate other than the programme's, a
+    payout time or method that is not the stated one, a refund or tax rule that contradicts it, or any credit, registration,
+    validity or self-referral rule while those are TODO. A sentence handing the point to the team or the written policy is not a
+    claim. Returns the constant names."""
     found = []
-    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
-        if _NEGATION_RE.search(sentence) or _HAND_OVER_RE.search(sentence):
+    rates = {re.sub(r"\s", "", m.group(0)) for n, _ in business_facts.PARTNERSHIP_FACTS for m in _PERCENT_RE.finditer(_fact(n))}
+    timing, method = _norm_term(_fact("PARTNERSHIP_PAYOUT_TIMING")), _fact("PARTNERSHIP_PAYOUT_METHOD")
+    # when a customer pays (monthly, annually upfront) is part of what the commission is earned on; when a partner is paid is not
+    earned_on = _norm_term(" ".join(_fact(n) for n in ("PARTNERSHIP_PAYOUT_TIMING", "PARTNERSHIP_ELIGIBLE_PAYMENT",
+                                                         "PARTNERSHIP_PAYOUT_TERMS")))
+
+    def add(name):
+        if name not in found:
+            found.append(name)
+    for sentence in _SENTENCE_SPLIT.split(text or ""):
+        if _HAND_OVER_RE.search(sentence):
             continue
-        for name, rx in _UNDEFINED_TERM_RES:
-            if business_facts.is_todo(name) and rx.search(sentence) and name not in found:
-                found.append(name)
+        if any(re.sub(r"\s", "", m.group(0)) not in rates for m in _PERCENT_RE.finditer(sentence)):
+            add("PARTNERSHIP_REWARDS")
+        if _MONEYISH_RE.search(sentence) or _PAYOUT_SENTENCE_RE.search(sentence):
+            known = timing if _PAYOUT_SENTENCE_RE.search(sentence) else earned_on
+            if any(_norm_term(m.group(0)) not in known for m in _TIMING_RE.finditer(sentence)):
+                add("PARTNERSHIP_PAYOUT_TIMING")
+            if any(m.group(0).lower() not in method for m in _METHOD_RE.finditer(sentence)):
+                add("PARTNERSHIP_PAYOUT_METHOD")
+        if business_facts.is_todo("PARTNERSHIP_REFUNDS"):
+            if _REFUND_ANY_RE.search(sentence):
+                add("PARTNERSHIP_REFUNDS")
+        elif _REFUND_WRONG_RE.search(sentence):
+            add("PARTNERSHIP_REFUNDS")
+        if _TAX_WRONG_RE.search(sentence) or (business_facts.is_todo("PARTNERSHIP_TAX_AND_DISCOUNTS") and _TAX_ANY_RE.search(sentence)):
+            add("PARTNERSHIP_TAX_AND_DISCOUNTS")
+        for name, rx in _TODO_ONLY_TERMS:
+            if business_facts.is_todo(name) and rx.search(sentence):
+                add(name)
     return found
 
 
+def states_instalments(text):
+    """True if a sentence says how instalments or part payments are treated. Until Fredrick confirms it, the bot may only say the
+    written partnership policy covers it."""
+    return any(_INSTALMENT_RE.search(sn) and not _HAND_OVER_RE.search(sn) for sn in _SENTENCE_SPLIT.split(text or ""))
+
+
+def states_commission_amount(text):
+    """True if the text writes a naira, dollar or other money amount."""
+    return bool(_AMOUNT_RE.search(text or ""))
+
+
 def confirms_eligibility(text):
-    """True if a sentence tells someone a person or sale qualifies, is eligible or will earn their commission, without
+    """True if a sentence tells someone a person, organisation or sale qualifies, is eligible or will earn their commission, without
     handing it to the team. Only the team confirms eligibility."""
     return any(_ELIGIBILITY_CLAIM_RE.search(sn) and not (_HAND_OVER_RE.search(sn) or _NEGATION_RE.search(sn))
-               for sn in re.split(r"(?<=[.!?])\s+", text or ""))
+               for sn in _SENTENCE_SPLIT.split(text or ""))
 
 
 def claims_recurring(text):
     """True if a sentence says renewals or later payments earn commission (a sentence with a negation is a denial)."""
-    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
-        if _RECURRING_CLAIM_RE.search(sentence) and not _NEGATION_RE.search(sentence):
-            return True
-    return False
+    return any(_RECURRING_CLAIM_RE.search(sn) and not _NEGATION_RE.search(sn) for sn in _SENTENCE_SPLIT.split(text or ""))
 
 
 def strip_intro(text):
@@ -969,18 +1034,27 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
                                         "(acceptance, eligibility, a payout, a valid referral, or a commission amount). "
                                         "Only the team can; say the team confirms the details personally."))
         if partner_context and claims_recurring(text):
-            problems.append(("recurring", "Your last attempt said renewals or later payments earn commission. The commission is "
-                                          "paid once, on the initial total cost, with no recurring payments: renewals and later "
-                                          "payments earn nothing."))
+            problems.append(("recurring", "Your last attempt said renewals or later subscription payments earn commission. The "
+                                          "commission is earned once, on the referred customer's initial payment, with no "
+                                          "recurring payments: renewals and later payments earn nothing."))
         if partner_context and confirms_eligibility(text):
-            problems.append(("eligibility", "Your last attempt told someone a person or sale qualifies or is eligible. Only the "
-                                            "team confirms eligibility; say the team will confirm it personally."))
-        if partner_context and undefined_terms(text):
-            problems.append(("undefined_terms", "Your last attempt stated a partnership term that has not been decided ("
-                                                + ", ".join(t.replace("PARTNERSHIP_", "").replace("_", " ").lower()
-                                                            for t in undefined_terms(text))
-                                                + "). For anything not in the partnership facts say the team confirms it "
-                                                  "personally."))
+            problems.append(("eligibility", "Your last attempt told someone a person, organisation or sale qualifies or is "
+                                            "eligible. Only the team confirms eligibility; say the team will confirm it "
+                                            "personally."))
+        if partner_context and states_commission_amount(text):
+            problems.append(("amount", "Your last attempt wrote a money amount for a commission. Never give or estimate an "
+                                       "amount for any product or customer; the rate is 20% and the team confirms the rest."))
+        if partner_context and states_instalments(text):
+            problems.append(("instalments", "Your last attempt said how instalments or part payments are treated. That is not "
+                                            "decided for you to state: say the written partnership policy covers it and the "
+                                            "team shares it with registered partners personally."))
+        if partner_context and unsupported_terms(text):
+            problems.append(("unsupported_terms", "Your last attempt stated a partnership term that is not in the partnership "
+                                                  "facts (" + ", ".join(t.replace("PARTNERSHIP_", "").replace("_", " ").lower()
+                                                                        for t in unsupported_terms(text))
+                                                  + "). State only what the facts say; for anything else say the written "
+                                                    "partnership policy covers it and the team shares it with registered "
+                                                    "partners personally."))
         if _RETIRED_REPORT_RE.search(asked_now) and _CANNOT_GET_RE.search(text):
             problems.append(("retired_wording", "Do not tell the customer they cannot get it. Say it is no longer offered, then "
                                                 "point to Mega-Net ERP Cloud as the current business management product."))

@@ -187,12 +187,27 @@ def settings():
     """Read-only view of the business facts the bot uses and how conversations are handled. No secrets."""
     from . import business_facts as bf
     cfg = current_app.config
-    facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.ALL_FACTS]
+    facts = [(label, bf.display(name), bf.is_todo(name)) for name, label in bf.FACTS]
+    partner = []  # every partnership constant: what it says, and exactly how much of it the bot may state
+    for name, label in bf.PARTNERSHIP_FACTS:
+        todo_ = bf.is_todo(name)
+        headline = bf.partnership_headline(name)
+        if todo_:
+            scope = "Unknown: the bot says the team / the written policy covers it and states nothing"
+        elif name in bf.PARTNERSHIP_POLICY_ONLY:
+            scope = "Written policy only: the bot never states this, it says the written policy covers it"
+        elif headline != bf.display(name):
+            scope = "The bot may state only: " + headline
+        else:
+            scope = "The bot may state this in full"
+        partner.append({"label": label, "value": bf.display(name), "todo": todo_, "scope": scope,
+                        "note": bf.PARTNERSHIP_NOTES.get(name)})
     modes = [("Running commit", (cfg.get("GIT_COMMIT") or "unknown")[:7]),
              ("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
              ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"])]
-    todo = [label for label, _, is_todo in facts if is_todo]
-    return render_template("settings.html", facts=facts, modes=modes, todo=todo)
+    todo = [label for label, _, is_todo in facts if is_todo] + [p["label"] for p in partner if p["todo"]]
+    return render_template("settings.html", facts=facts, modes=modes, todo=todo,
+                           partner_todo=[p for p in partner if p["todo"]], partner_filled=[p for p in partner if not p["todo"]])
 
 
 @bp.get("/leads/<int:lead_id>")

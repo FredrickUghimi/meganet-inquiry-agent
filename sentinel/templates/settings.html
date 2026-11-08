@@ -12,6 +12,22 @@
     {% endfor %}
   </table></div>
 </div>
+<div class="card" id="partnership">
+  <h2 style="margin-top:0">Referral partnership programme</h2>
+  <p class="mute">Edit these in <code>sentinel/business_facts.py</code>. The bot states only what is marked below; everything else it hands to the written partnership policy.</p>
+  <h3>Still TODO ({{ partner_todo|length }})</h3>
+  {% if partner_todo %}<div class="table-scroll"><table>
+    {% for p in partner_todo %}<tr><th>{{ p.label }}</th><td><span class="badge" style="background:#fee2e2;color:#b91c1c">TODO</span> <span class="mute">{{ p.scope }}</span></td></tr>{% endfor %}
+  </table></div>{% else %}<p class="mute">Nothing is TODO.</p>{% endif %}
+  <details style="margin-top:12px">
+    <summary><b>What the bot knows: {{ partner_filled|length }} filled-in details</b> (tap to review)</summary>
+    <div class="table-scroll"><table>
+      {% for p in partner_filled %}<tr><th>{{ p.label }}</th><td>{{ p.value }}
+        <div class="mute">{{ p.scope }}</div>
+        {% if p.note %}<div><span class="badge" style="background:#fef3c7;color:#92400e">Awaiting Fredrick</span> <span class="mute">{{ p.note }}</span></div>{% endif %}</td></tr>{% endfor %}
+    </table></div>
+  </details>
+</div>
 <div class="card">
   <h2 style="margin-top:0">Handling</h2>
   <table>{% for label, value in modes %}<tr><th>{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}</table>
