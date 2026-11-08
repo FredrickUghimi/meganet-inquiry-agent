@@ -7,7 +7,10 @@
     <span class="badge s-{{ lead.status }}">{{ lead.status.replace('_',' ') }}</span>
     {% if lead.followup_paused %}<span class="badge">follow-ups paused</span>{% endif %}
     {% if lead.partner_enquiry %}<span class="badge" style="background:#ede9fe;color:#5b21b6">Partner enquiry</span>{% endif %}
+    {% if lead.opted_out %}<span class="badge" style="background:#1f2937;color:#fff">Opted out</span>{% elif lead.followups_off %}<span class="badge">No follow-ups (not interested)</span>{% endif %}
     {% set w = wait_label(lead) %}{% if w %}<span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span>{% endif %}</h2>
+  {% if lead.opted_out %}<div class="flash" style="background:#e5e7eb;color:#111827">This lead asked us to stop{% if lead.opted_out_at %} on {{ lead.opted_out_at|local }}{% endif %}. No template or follow-up will be sent to this number again. A message from them is still answered; only a clear request to start again lifts it.</div>{% endif %}
+  {% if lead.template_error %}<div class="flash" style="background:#fee2e2;color:#7f1d1d">⚠ WhatsApp template problem{% if lead.template_error_at %} ({{ lead.template_error_at|local }}){% endif %}: {{ lead.template_error }}. The same follow-up is tried once more, then follow-ups pause.</div>{% endif %}
   {% if lead.ai_note %}<div class="flash" style="background:#fee2e2;color:#7f1d1d">⚠ {{ lead.ai_note }}
     If this says classification failed, the lead was treated as "exploring" (keyword checks for price/demo still apply). Fix the cause, then tap Retry reply.</div>{% endif %}
   {% if lead.status == 'ready' and lead.summary %}<div><strong>Ready because:</strong> {{ lead.summary }}</div>
@@ -71,6 +74,7 @@
       <div class="meta">{% if m.sender == 'owner' %}<b>You</b> · {% endif %}{{ m.sent_at|local }} · {{ m.channel }}
         {%- if m.is_followup %} · follow-up day {{ m.followup_stage }}{% endif %}
         {%- if m.status == 'failed' %} · NOT DELIVERED: {{ m.error }}{% endif %}
+        {%- if m.direction == 'outbound' and m.template %} · template {{ m.template }}: <b>{{ m.delivery_status or ('failed' if m.status == 'failed' else 'sent') }}</b>{% elif m.direction == 'outbound' and m.delivery_status in ('delivered', 'read') %} · {{ m.delivery_status }}{% endif %}
         {%- if m.direction == 'inbound' and m.id in waiting_ids %} · <span class="badge" style="background:#fee2e2;color:#b91c1c">Waiting</span>{% endif %}
         {%- if m.direction == 'inbound' and lead.phone %} · <a href="{{ url_for('dashboard.lead_detail', lead_id=lead.id, quote=m.id) }}#composer">Reply</a>{% endif %}</div>
     </div>

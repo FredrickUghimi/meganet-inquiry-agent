@@ -55,6 +55,7 @@
   {% if session.get('auth') %}
     <a href="{{ url_for('dashboard.new_inquiry') }}">Log inquiry</a>
     <a href="{{ url_for('dashboard.demos') }}">Demos</a>
+    <a href="{{ url_for('dashboard.followups') }}">Follow-ups</a>
     <a href="{{ url_for('dashboard.settings') }}">Settings</a>
     <form method="post" action="{{ url_for('dashboard.logout') }}" style="margin:0">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Log out</button>

@@ -21,6 +21,7 @@
     {% if select %}<td><input type="checkbox" name="ids" value="{{ l.id }}" aria-label="Select {{ l.display_name }}" style="width:auto"></td>{% endif %}
     <td><a href="{{ url_for('dashboard.lead_detail', lead_id=l.id) }}">{{ l.display_name }}</a>
       {% set w = wait_label(l) %}{% if w %}<div><span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span></div>{% endif %}
+      {% if l.opted_out %}<div><span class="badge" style="background:#1f2937;color:#fff">Opted out</span></div>{% endif %}
       {% if l.partner_enquiry %}<div><span class="badge" style="background:#ede9fe;color:#5b21b6">Partner enquiry</span></div>{% endif %}
       {% if l.referrer_name or l.referrer_phone %}<div class="mute">Referred by {{ l.referrer_name or '' }}{% if l.referrer_phone %} ({{ l.referrer_phone }}){% endif %}</div>{% endif %}
       {% if l.summary %}<div class="mute">{{ l.summary }}</div>{% endif %}</td>

@@ -182,7 +182,8 @@ CLASSIFY_INSTRUCTIONS = (
     '"flag": "none|complaint|custom_request|unanswered", "question": "<the lead\'s question or null>", '
     '"existing_client": true|false, "client_topic": "support|sales|null", '
     '"topic": "ehr|erp|other_product|academy|dev_services|partnership|general", "other_product": "<name or null>", '
-    '"referrer_name": "<name or null>", "referrer_phone": "<number or null>"}\n'
+    '"referrer_name": "<name or null>", "referrer_phone": "<number or null>", '
+    '"contact_preference": "none|opt_out|restart|not_interested"}\n'
     "intent: exploring = still learning or undecided; ready_demo = asks for or agrees to a demo/call/meeting; "
     "ready_pricing = asks what it costs or for a quote/proposal; not_fit = clearly not a match or says they "
     "are not interested.\n"
@@ -205,6 +206,10 @@ CLASSIFY_INSTRUCTIONS = (
     "general = anything else (greetings, demo, pricing, thanks, what is Mega-Net Software). other_product is null "
     "unless topic is other_product. referrer_name / referrer_phone: only when the lead says someone referred or sent them "
     "('John sent me', 'I was referred by Mr Okoro'); the person who referred them, never the lead; otherwise null. "
+    "contact_preference: opt_out = the lead clearly asks us not to message or contact them again, in any language including "
+    "Nigerian Pidgin (stop, unsubscribe, leave me alone, abeg no send me message again); restart = a lead who asked us to stop "
+    "now clearly asks to hear from us again; not_interested = says they are not interested but does not ask us to stop; none "
+    "otherwise, including a question about stopping something in the product or a bus stop. "
     "Questions about those topics are covered by notes you may not see yet, so do not "
     "use the flag 'unanswered' only because the answer is not in front of you."
 )
@@ -249,6 +254,8 @@ def parse_classification(text):
     extra["topic"] = topic if topic in TOPICS else "general"
     if extra["topic"] == "other_product" and isinstance(other, str) and other.strip() and other.strip().lower() != "null":
         extra["other_product"] = other.strip()[:80]
+    if data.get("contact_preference") in ("opt_out", "restart", "not_interested"):
+        extra["contact_preference"] = data["contact_preference"]
     for key, limit in (("referrer_name", 120), ("referrer_phone", 40)):
         v = data.get(key)
         if isinstance(v, str) and v.strip() and v.strip().lower() not in ("null", "none"):
@@ -334,6 +341,65 @@ def client_topic_hint(text):
     if _SALES_WORDS.search(text or "") or _PRICING_WORDS.search(text or "") or DEMO_WORDS.search(text or ""):
         return "sales"
     return "support"
+
+
+# --- opt-out ("stop") detection ---------------------------------------------------------------------------------------------------
+# Deterministic first, on every inbound message; the classifier's contact_preference decides the unclear ones.
+
+def _plain(text):
+    """Lower case, apostrophes dropped, everything else that is not a letter or digit a single space."""
+    return re.sub(r"[^a-z0-9]+", " ", re.sub(r"['\u2019`]", "", (text or "").lower())).strip()
+
+
+_OPT_OUT_COMMAND = re.compile(
+    r"^(?:(?:abeg|please|pls|plz|kindly) )*(?:stop|unsubscribe|opt out|optout)"
+    r"(?: it| now| all| am| messages?| messaging| sending| texting| contacting| the messages?| these messages?| everything)*"
+    r"(?: to me| me)?(?: abeg| please| pls| plz| now)*$")
+_OPT_OUT_PHRASES = tuple(re.compile(p) for p in (
+    r"\bunsubscribe\b",
+    r"\b(?:do not|dont|never|pls dont|please dont|abeg dont) (?:message|text|contact|call|whatsapp|disturb|bother|send me)(?: me)?\b",
+    r"\bleave me alone\b", r"\babeg leave me\b", r"\bleave me o\b",
+    r"\bremove me\b", r"\btake me off\b", r"\bdelete my (?:number|details|contact)\b", r"\bcomot me\b",
+    r"\bno more (?:messages?|texts?|follow ?ups?|whatsapp)\b",
+    r"\bstop (?:messaging|texting|contacting|disturbing|bothering|calling|sending|whatsapping)\b",
+    r"\bstop (?:the )?(?:messages?|texts?|follow ?ups?)\b",
+    # Nigerian Pidgin
+    r"\babeg stop\b", r"\bno send (?:me )?(?:any )?(?:message|messages|text|info)(?: to me)?(?: again| anymore| o)?\b",
+    r"\bno (?:dey )?(?:send|text|message|disturb) me\b", r"\bno dey send (?:me )?(?:message|messages|text)\b",
+    r"\bmake you no (?:send|message|text|disturb|contact|call)\b", r"\bstop (?:to )?dey (?:send|disturb|message|text)\b",
+    r"\bi no wan (?:hear|get) (?:from|any)\b", r"\bno (?:text|message|contact|call) me again\b",
+))
+_RESTART_PHRASES = tuple(re.compile(p) for p in (
+    r"\b(?:send|message|text|contact|whatsapp) me (?:the |some |more )?(?:information|info|updates?|messages?|details)?(?: about \w+)? ?again\b",
+    r"\b(?:you can|u can|you may|you fit|make you) (?:message|text|contact|send|whatsapp)(?: me)?(?: again| now)\b",
+    r"\bstart (?:sending|messaging|texting) (?:me )?(?:again|information|info|updates?)\b",
+    r"\bresubscribe\b", r"\bsubscribe me\b", r"\bi (?:want|would like|wan) (?:to hear from you|updates?|information|info|messages?) again\b",
+    r"\bcontinue (?:sending|messaging)\b",
+))
+_NOT_INTERESTED = tuple(re.compile(p) for p in (
+    r"\bnot interested\b", r"\bno longer interested\b", r"\bno interest\b", r"\bi no (?:interested|gree|need am|want am)\b",
+    r"^(?:no|nope) (?:thanks|thank you)$", r"^not for me$",
+))
+OPT_OUT_PHRASE_MAX_WORDS = 14  # a long message that merely contains "remove me" is not a stop request
+
+
+def optout_intent(text):
+    """'opt_out', 'restart', 'not_interested' or None for one inbound message, from fixed patterns only. 'restart' is only
+    acted on for a lead that is opted out."""
+    plain = _plain(text)
+    if not plain:
+        return None
+    words = len(plain.split())
+    if _OPT_OUT_COMMAND.match(plain) or (words <= OPT_OUT_PHRASE_MAX_WORDS and any(rx.search(plain) for rx in _OPT_OUT_PHRASES)):
+        return "opt_out"
+    if words <= OPT_OUT_PHRASE_MAX_WORDS and any(rx.search(plain) for rx in _RESTART_PHRASES):
+        return "restart"
+    if any(rx.search(plain) for rx in _NOT_INTERESTED):  # any length: "not interested, but does X do Y?" still stops follow-ups
+        return "not_interested"
+    return None
+
+
+OPT_OUT_CONFIRMATION = "Understood. We won't message you again. If you ever want to talk, just message this number."
 
 
 def describe_error(exc):

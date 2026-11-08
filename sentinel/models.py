@@ -52,6 +52,11 @@ class Lead(db.Model):
     last_question = db.Column(db.String(300))  # the last question the bot asked (not asked again until answered / two replies on)
     last_question_age = db.Column(db.Integer, nullable=False, default=0)  # bot replies sent since that question
     after_hours_note_at = db.Column(db.DateTime)  # when "Our team will reply personally from ..." was last added
+    opted_out = db.Column(db.Boolean, nullable=False, default=False)  # asked us to stop: no template or follow-up, ever, until they restart
+    opted_out_at = db.Column(db.DateTime)
+    followups_off = db.Column(db.Boolean, nullable=False, default=False)  # "not interested": no automatic follow-ups, still answerable
+    template_error = db.Column(db.String(500))  # Meta's code and message when a template send was rejected (shown in red)
+    template_error_at = db.Column(db.DateTime)
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",
@@ -79,6 +84,8 @@ class Message(db.Model):
     handled = db.Column(db.Boolean, nullable=False, default=True)  # inbound only: auto-reply pass done
     choice_id = db.Column(db.String(32))  # inbound: id of the button/list row the lead tapped
     sender = db.Column(db.String(8))  # outbound only: "owner" (Fredrick, shown as "You"); null = the bot
+    template = db.Column(db.String(40))  # outbound: the template key (day1, day3, day7, ack) when a template was sent
+    delivery_status = db.Column(db.String(10))  # outbound: sent / delivered / read / failed, from Meta's status events
 
     lead = db.relationship("Lead", back_populates="messages")
 

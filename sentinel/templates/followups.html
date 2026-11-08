@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Upcoming follow-ups{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 style="margin-top:0">Upcoming follow-ups (next 24 hours)</h2>
+  <p class="mute">Nothing is sent from this page. Pause a lead to take it out of the list. Days run: {{ stages|join(', ') or 'none' }}.
+    Templates sent today: {{ sent_today }} of {{ cap }} (daily cap). Day 3 and Day 7 are Marketing templates, which cost more than Day 1.</p>
+  {% if not enabled %}<div class="banner" role="alert"><b>Follow-ups are switched off</b> (FOLLOWUPS_ENABLED=0). Nothing will be sent.</div>{% endif %}
+  {% if rows %}
+  <div class="table-scroll"><table>
+    <tr><th>Lead</th><th>Phone</th><th>Sends</th><th>Message</th><th>Why it qualifies</th><th></th></tr>
+    {% for r in rows %}
+    <tr>
+      <td><a href="{{ url_for('dashboard.lead_detail', lead_id=r.lead.id) }}">#{{ r.lead.id }}</a></td>
+      <td>{{ mask(r.lead.phone) }}</td>
+      <td>{{ r.send_at|local }}</td>
+      <td>Day {{ r.stage }}: {% if r.kind == 'template' %}template <code>{{ r.template }}</code>{% else %}free-text (window still open){% endif %}</td>
+      <td class="mute">{{ r.why }}</td>
+      <td><form method="post" action="{{ url_for('dashboard.lead_action', lead_id=r.lead.id) }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="pause">
+        <input type="hidden" name="next" value="followups"><button>Pause</button></form></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="mute">No follow-ups are due in the next 24 hours.</p>{% endif %}
+</div>
+{% endblock %}

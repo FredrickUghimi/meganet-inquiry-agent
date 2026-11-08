@@ -153,7 +153,7 @@ too (name, one question, within 165 words, the product's own link exactly as sto
 only).
 
 **Checking replies before you rely on them.** In the Render Shell run `python scripts/eval_replies.py` (needs
-`ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it by name, `--only 28,31` or `--only 28-31` re-runs scenarios by number, `--out run.txt` also saves the output; failed scenarios are listed again at the very end under FAILED SCENARIOS). It runs 46 awkward
+`ANTHROPIC_API_KEY`; `--list` shows the scenarios without it, `--only price --verbose` narrows it by name, `--only 28,31` or `--only 28-31` re-runs scenarios by number, `--out run.txt` also saves the output; failed scenarios are listed again at the very end under FAILED SCENARIOS). It runs 56 awkward
 customers (thanks plus price, a topic switch, a vague "ok", Pidgin, two questions at once, a Tuesday demo request, a
 complaint, a voice note, a request for a human, repeated questions, a long silence and more) through the real pipeline
 with the real Claude in dry-run mode, using a temporary database, so nothing is sent and nothing is stored. Each reply
@@ -269,3 +269,12 @@ The dashboard shows a red **Needs your reply** badge with the waiting time, and 
 | `help` | List the commands |
 
 Only the exact owner number can run commands, and only after the webhook signature has been verified. Any other text from the owner is ignored (or treated as a lead when `OWNER_AS_LEAD=1`). Every alert and reminder includes the lead id and the line `Reply "done <id>" after you have contacted them.`
+
+
+## Before template follow-ups go live
+
+Set these on Render (all optional): `FOLLOWUPS_ENABLED` (1 = on, 0 = no automatic follow-ups), `FOLLOWUP_DAILY_CAP` (default 30 follow-up
+templates a day), `FOLLOWUP_STAGES` (default `1,3,7`; `1,3` skips the Day 7 template; `1` sends only Day 1). **Day 3 and Day 7 are Marketing templates,
+which cost more per message than Day 1 (Utility).** Run `python scripts/manage_followups.py preview` in the Shell to see who would be messaged
+in the next 24 hours (nothing is sent), or open **Follow-ups** on the dashboard and pause any lead. A lead that writes "stop" (or "abeg stop") is
+opted out at once and never receives a template again.

@@ -96,4 +96,11 @@ def load_config():
         # Scheduler
         "SCHEDULER_ENABLED": _flag("SCHEDULER_ENABLED", True),
         "FOLLOWUP_CHECK_MINUTES": int(_env("FOLLOWUP_CHECK_MINUTES", "5")),
+        # Business-initiated follow-ups (WhatsApp templates). 0 = none are sent; everything else keeps working.
+        "FOLLOWUPS_ENABLED": _flag("FOLLOWUPS_ENABLED", True),
+        # Most follow-up template messages sent per day (Africa/Lagos calendar day), across all leads.
+        "FOLLOWUP_DAILY_CAP": int(_env("FOLLOWUP_DAILY_CAP", "30")),
+        # Which follow-up days run. "1,3" skips the Day 7 template. Day 3 and Day 7 are Marketing templates, which cost more
+        # per message than the Utility Day 1 template.
+        "FOLLOWUP_STAGES": _env("FOLLOWUP_STAGES", "1,3,7"),
     }

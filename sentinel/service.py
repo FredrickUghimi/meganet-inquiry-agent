@@ -1,7 +1,7 @@
 """Core lead logic: intake, auto-reply, classification, escalation, follow-up sequence."""
 import logging
 import re
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from flask import current_app
 from sqlalchemy import func
@@ -12,10 +12,10 @@ from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
 
 log = logging.getLogger(__name__)
 
-STAGES = (1, 3, 7)          # days after the lead's last message
+STAGES = (1, 3, 7)          # every follow-up day that has a template; FOLLOWUP_STAGES chooses which of them run
 ACTIVE = ("new", "engaged")  # statuses the follow-up sequence applies to
 WINDOW = timedelta(hours=23, minutes=30)  # Meta's window is 24h; keep a margin
-MAX_SEND_FAILURES = 3
+MAX_SEND_FAILURES = 2  # the first attempt and ONE retry of the same follow-up; then the sequence is paused
 
 
 def normalize_phone(raw):
@@ -106,13 +106,22 @@ def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp")
     return lead
 
 
+def followup_stages():
+    """The follow-up days that run (FOLLOWUP_STAGES, e.g. "1,3"), limited to the days that have a template, in order."""
+    raw = str(current_app.config.get("FOLLOWUP_STAGES") or "")
+    chosen = sorted({int(p) for p in re.findall(r"\d+", raw)} & set(STAGES))
+    return tuple(chosen)
+
+
 def next_followup_time(lead):
     """When the next stage is due, or None if the sequence should not run."""
     if lead.status not in ACTIVE or lead.followup_paused or not lead.phone:
         return None
+    if lead.opted_out or lead.followups_off or lead.partner_enquiry:
+        return None  # asked us to stop / not interested / a partner enquiry: no automatic follow-ups
     if lead.is_existing_client and not lead.upgrade_enquiry:
         return None  # existing clients get no automatic follow-ups unless they are a sales lead
-    nxt = next((s for s in STAGES if s > lead.followup_stage), None)
+    nxt = next((s for s in followup_stages() if s > lead.followup_stage), None)
     if nxt is None:
         return None
     return (lead.last_inbound_at or lead.created_at) + timedelta(days=nxt)
@@ -132,6 +141,10 @@ def record_inbound(lead, body, channel, external_id=None, at=None, choice_id=Non
     lead.followup_failures = 0
     if lead.status == "cold":
         lead.status = "engaged"
+    if ai.optout_intent(body) == "opt_out" and not lead.opted_out:
+        # marked before the reply pipeline runs, so no follow-up can slip out in between
+        lead.opted_out, lead.opted_out_at = True, at
+        log.info("lead=%s opted out (keyword, recorded on arrival)", lead.id)
     lead.next_followup_at = next_followup_time(lead)
     db.session.commit()
     return msg
@@ -194,6 +207,13 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
     """Send and log. Never raises: a failed send is stored as a failed Message. Returns the Message.
     Free-form bot text goes through the repeat guard (not Fredrick's own messages, not templates)."""
     cfg = current_app.config
+    if lead.opted_out and (template or is_followup) and sender != "owner":
+        # the last line of defence: nothing business-initiated ever goes to a number that asked us to stop
+        log.warning("blocked a %s to lead %s: the lead opted out", "template" if template else "follow-up", lead.id)
+        blocked = Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body=text or "", sent_at=utcnow(),
+                          is_followup=is_followup, followup_stage=stage, status="failed", error="blocked: the lead opted out",
+                          handled=True, delivery_status="failed")
+        return blocked  # not stored
     if text and not template and guard and sender != "owner":
         text = _repeat_guard(lead, text)
     external_id = error = None
@@ -220,7 +240,8 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
             text = templates_meta.render(template, params)
     msg = Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body=text, sent_at=utcnow(),
                   is_followup=is_followup, followup_stage=stage, external_id=external_id,
-                  status="failed" if error else "sent", error=error, handled=True, sender=sender)
+                  status="failed" if error else "sent", error=error, handled=True, sender=sender,
+                  template=template, delivery_status="failed" if error else "sent")
     db.session.add(msg)
     if not error:
         lead.last_contact_at = msg.sent_at
@@ -1135,6 +1156,50 @@ def handle_lead_reply(lead_id, *, retry=False, dry_run=False, trace=None):
     return outcome, reason
 
 
+# --- opt-out ("stop") -------------------------------------------------------------------------------------------------------------
+
+def _stop_followups(lead, why):
+    """'Not interested': no automatic follow-ups; the lead is still answered normally."""
+    lead.followups_off = True
+    lead.next_followup_at = None
+    db.session.commit()
+    log.info("lead=%s follow-ups stopped (%s)", lead.id, why)
+
+
+def _lift_opt_out(lead, why):
+    """A clear request to restart: automatic follow-ups may run again."""
+    lead.opted_out, lead.opted_out_at, lead.followups_off = False, None, False
+    lead.next_followup_at = next_followup_time(lead)
+    db.session.commit()
+    log.info("lead=%s opt-out lifted (%s)", lead.id, why)
+
+
+def _opt_out_and_confirm(lead, how, dry_run, say):
+    """The lead asked us to stop: mark it, cancel the follow-ups, and send ONE short free-text confirmation inside the window.
+    Returns the pipeline outcome."""
+    text = ai.OPT_OUT_CONFIRMATION
+    say(f"opt-out detected ({how})")
+    say(f"drafted reply text: {text!r}", detail=True)
+    if dry_run:
+        return "skipped", "dry run: would mark the lead opted out and send the confirmation"
+    if not lead.opted_out:
+        lead.opted_out, lead.opted_out_at = True, utcnow()
+        log.info("lead=%s opted out (%s)", lead.id, how)
+    lead.next_followup_at = None
+    lead.awaiting_choice = False
+    db.session.commit()
+    last_bot = next((m for m in reversed(list(lead.messages)) if m.direction == "outbound" and m.status != "failed"
+                     and m.channel != "manual" and m.sender is None), None)
+    if last_bot and last_bot.body == text:
+        return "skipped", "opted out; the confirmation was already sent"
+    if not lead.phone or not whatsapp.is_configured() or not window_open(lead):
+        return "skipped", "opted out; no confirmation sent (no open WhatsApp window or WhatsApp not configured)"
+    msg = send_whatsapp(lead, text=text, guard=False)
+    if msg.status == "failed":
+        return "failed", f"opted out; the confirmation failed to send: {msg.error}"
+    return "replied", "opt-out confirmed"
+
+
 def _reply_pipeline(lead_id, retry, dry_run, say):
     model = current_app.config["ANTHROPIC_MODEL"]
     lead = db.session.get(Lead, lead_id)
@@ -1163,6 +1228,19 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         Message.query.filter(Message.id.in_([m.id for m in pending])).update({"handled": True},
                                                                               synchronize_session=False)
         db.session.commit()
+
+    # Opt-out first, on every inbound message, by fixed patterns; the classifier decides the unclear ones further down.
+    intents = [ai.optout_intent(m.body) for m in pending]
+    contact_context = ""
+    if "opt_out" in intents:
+        return _opt_out_and_confirm(lead, "keyword", dry_run, say)
+    if "restart" in intents and lead.opted_out:
+        if not dry_run:
+            _lift_opt_out(lead, "keyword")
+        contact_context = ("\nThis customer had asked us to stop messaging them and has now clearly asked to hear from us again. "
+                           "Welcome them back warmly in one sentence, then answer their message.")
+    elif "not_interested" in intents and not dry_run:
+        _stop_followups(lead, "not interested, keyword")
 
     if lead.status in ("closed_won", "closed_lost"):
         return "skipped", f"lead is {lead.status}; no auto-reply (reopen it on the dashboard)"
@@ -1220,6 +1298,16 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         say(f"classify raw text: {cinfo['raw_text']!r}", detail=True)
 
     latest = " ".join(m.body for m in pending)
+    pref = result.get("contact_preference")  # the classifier's view; the fixed patterns above already had their say
+    if pref == "opt_out" and not any(intents):
+        return _opt_out_and_confirm(lead, "classifier", dry_run, say)
+    if pref == "restart" and lead.opted_out and not contact_context:
+        if not dry_run:
+            _lift_opt_out(lead, "classifier")
+        contact_context = ("\nThis customer had asked us to stop messaging them and has now clearly asked to hear from us again. "
+                           "Welcome them back warmly in one sentence, then answer their message.")
+    elif pref == "not_interested" and not any(intents) and not dry_run and not lead.followups_off:
+        _stop_followups(lead, "not interested, classifier")
     if result.get("existing_client") and not lead.is_existing_client and not dry_run:
         lead.is_existing_client = True
         db.session.commit()
@@ -1319,6 +1407,7 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
     if is_open:
         now = utcnow()
         context = demo_context(lead, history, pending, now, intent)
+        context += contact_context
         if referral_said:
             context += ("\nThe customer says someone referred them. Say only that the team will note it; never confirm that "
                         "the referral is valid or that any commission is due.")
@@ -1487,18 +1576,127 @@ def _handle_choice(lead, choice, history, dry_run, say):
 
 # --- follow-up sequence ---------------------------------------------------------------------
 
-def send_followup(lead):
-    stage = next((s for s in STAGES if s > lead.followup_stage), None)
+FOLLOWUP_GAP = timedelta(hours=20)   # never more than one follow-up per lead in 20 hours
+FOLLOWUP_MAX_TOTAL = 3               # and never more than three in total
+HUMAN_RECHECK = timedelta(hours=6)   # a human-handled lead is looked at again later
+
+
+class Block:
+    """Why a lead must not get an automatic follow-up now. kind: disabled / cap (stay queued), gap / human (try again at
+    `until`), permanent (the sequence stops)."""
+
+    def __init__(self, kind, why, until=None):
+        self.kind, self.why, self.until = kind, why, until
+
+
+def _lagos_day_start_utc(now):
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(current_app.config["DISPLAY_TZ"])
+    local = now.replace(tzinfo=timezone.utc).astimezone(tz)
+    start = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def template_followups_today(now=None):
+    """Follow-up TEMPLATE messages sent today (Africa/Lagos calendar day), for FOLLOWUP_DAILY_CAP."""
+    now = now or utcnow()
+    return Message.query.filter(Message.is_followup.is_(True), Message.template.isnot(None), Message.status != "failed",
+                                Message.sent_at >= _lagos_day_start_utc(now)).count()
+
+
+def followups_sent(lead):
+    return (Message.query.filter(Message.lead_id == lead.id, Message.is_followup.is_(True), Message.status != "failed")
+            .order_by(Message.sent_at.desc()).all())
+
+
+def followup_block_reason(lead, now=None, *, uses_template=True, check_cap=True):
+    """None if this lead may get an automatic follow-up now; otherwise a Block. Never sent to a lead that is paused or marked
+    contacted, opted out, 'not interested', closed or not active, an existing client (unless a sales lead), a partner enquiry or
+    human-handled; never more than one in 20 hours, three in total, or FOLLOWUP_DAILY_CAP template sends a day."""
+    cfg, now = current_app.config, now or utcnow()
+    if not cfg["FOLLOWUPS_ENABLED"]:
+        return Block("disabled", "follow-ups are switched off (FOLLOWUPS_ENABLED=0)")
+    if not lead.phone:
+        return Block("permanent", "no phone number")
+    if lead.opted_out:
+        return Block("permanent", "the lead opted out")
+    if lead.followups_off:
+        return Block("permanent", "the lead said they are not interested")
+    if lead.followup_paused:
+        return Block("permanent", "follow-ups are paused or the lead is marked contacted")
+    if lead.status in ("closed_won", "closed_lost"):
+        return Block("permanent", f"the lead is {lead.status.replace('_', ' ')}")
+    if lead.status not in ACTIVE:
+        return Block("permanent", f"the lead is {lead.status}, not new or engaged")
+    if lead.is_existing_client and not lead.upgrade_enquiry:
+        return Block("permanent", "existing client (not a sales enquiry)")
+    if lead.partner_enquiry:
+        return Block("permanent", "partner enquiry")
+    if human_handled(lead):
+        return Block("human", "a person is handling the lead", now + HUMAN_RECHECK)
+    sent = followups_sent(lead)
+    if len(sent) >= FOLLOWUP_MAX_TOTAL:
+        return Block("permanent", f"{FOLLOWUP_MAX_TOTAL} follow-ups already sent")
+    if sent and now - sent[0].sent_at < FOLLOWUP_GAP:
+        return Block("gap", "a follow-up was sent less than 20 hours ago", sent[0].sent_at + FOLLOWUP_GAP)
+    if check_cap and uses_template and template_followups_today(now) >= cfg["FOLLOWUP_DAILY_CAP"]:
+        return Block("cap", f"the daily cap of {cfg['FOLLOWUP_DAILY_CAP']} follow-up templates is reached")
+    return None
+
+
+def _record_template_failure(lead, msg, key, first):
+    """Meta rejected a template: keep its code and message on the lead (shown in red) and tell Fredrick once."""
+    now = utcnow()
+    name = templates_meta.TEMPLATES.get(key, {}).get("name", key)
+    lead.template_error = f"{name}: {msg.error}"[:500]
+    lead.template_error_at = now
+    log.warning("template %s for lead=%s was rejected: %s", name, lead.id, msg.error)
+    if first and not (lead.last_owner_alert_at and now - lead.last_owner_alert_at < OWNER_ALERT_THROTTLE):
+        send_owner_alert(lead, f"WhatsApp rejected the {name} follow-up to {lead.display_name}: "
+                               f"{templates_meta.clean_param(msg.error, 200)}. One retry in an hour, then follow-ups pause.")
+
+
+def note_delivery_status(msg, status, error=None):
+    """Meta's delivery status event for a message we sent: sent, delivered, read or failed. Delivery only moves forward. A
+    follow-up template that fails to deliver is recorded on the lead, Fredrick is told once, and the sequence pauses."""
+    order = {"sent": 1, "delivered": 2, "read": 3}
+    if status in order:
+        if order.get(msg.delivery_status or "sent", 1) < order[status] and msg.delivery_status != "failed":
+            msg.delivery_status = status
+        db.session.commit()
+        return
+    if status != "failed":
+        return
+    msg.status, msg.delivery_status, msg.error = "failed", "failed", (error or "delivery failed")[:500]
+    if msg.template and msg.direction == "outbound":
+        lead = db.session.get(Lead, msg.lead_id)
+        _record_template_failure(lead, msg, msg.template, first=True)
+        lead.followup_paused = True
+        lead.next_followup_at = None
+    db.session.commit()
+
+
+def send_followup(lead, now=None):
+    stage = next((s for s in followup_stages() if s > lead.followup_stage), None)
+    now = now or utcnow()
     if stage is None or not lead.phone:
         lead.next_followup_at = None
         db.session.commit()
+        return
+    window = window_open(lead)
+    block = followup_block_reason(lead, now, uses_template=not window)
+    if block:
+        log.info("follow-up for lead=%s not sent: %s", lead.id, block.kind)
+        if block.kind not in ("disabled", "cap"):  # those stay queued and are looked at again on the next tick
+            lead.next_followup_at = block.until
+            db.session.commit()
         return
     history = list(lead.messages)
     previous = [m.body for m in history if m.is_followup and m.status == "sent"]
     line = ai.draft_followup_line(lead, history, stage, previous)
     name = lead.name or "there"
 
-    if window_open(lead):
+    if window:
         msg = send_whatsapp(lead, text=f"Hi {name}. {line}", is_followup=True, stage=stage)
     else:
         msg = send_whatsapp(lead, template=f"day{stage}", is_followup=True, stage=stage,
@@ -1506,8 +1704,14 @@ def send_followup(lead):
 
     now = utcnow()
     if msg.status == "failed":
+        if (msg.error or "").startswith("blocked:"):  # never retried: the lead asked us to stop
+            lead.next_followup_at = None
+            db.session.commit()
+            return
         lead.followup_failures += 1
-        if lead.followup_failures >= MAX_SEND_FAILURES:
+        if not window:
+            _record_template_failure(lead, msg, f"day{stage}", first=lead.followup_failures == 1)
+        if lead.followup_failures >= MAX_SEND_FAILURES:  # the same follow-up is tried once more, never a third time
             lead.followup_paused = True
             lead.next_followup_at = None
             log.error("Lead %s: %d follow-up sends failed; sequence paused", lead.id, lead.followup_failures)
@@ -1516,12 +1720,46 @@ def send_followup(lead):
     else:
         lead.followup_failures = 0
         lead.followup_stage = stage
-        if stage == STAGES[-1]:
+        if not window:
+            lead.template_error = lead.template_error_at = None
+        if stage == followup_stages()[-1]:
             lead.status = "cold"
         due = next_followup_time(lead)
         # If the app was down and stages piled up, still leave a gap between messages.
-        lead.next_followup_at = max(due, now + timedelta(hours=12)) if due else None
+        lead.next_followup_at = max(due, now + FOLLOWUP_GAP) if due else None
     db.session.commit()
+
+
+def upcoming_followups(hours=24, now=None):
+    """The leads that would get an automatic follow-up in the next `hours` hours, soonest first: [dict(lead, stage, send_at,
+    kind 'template'/'text', template, why)]. Nothing is sent. Empty while FOLLOWUPS_ENABLED=0."""
+    now = now or utcnow()
+    cfg = current_app.config
+    if not cfg["FOLLOWUPS_ENABLED"]:
+        return []
+    horizon = now + timedelta(hours=hours)
+    leads = (Lead.query.filter(Lead.next_followup_at.isnot(None), Lead.next_followup_at <= horizon,
+                               Lead.status.in_(ACTIVE)).order_by(Lead.next_followup_at, Lead.id).all())
+    rows = []
+    for lead in leads:
+        stage = next((s for s in followup_stages() if s > lead.followup_stage), None)
+        if stage is None:
+            continue
+        block = followup_block_reason(lead, now, check_cap=False)
+        if block and block.kind != "gap":
+            continue
+        send_at = max(lead.next_followup_at, now, block.until if block else now)
+        if send_at > horizon:
+            continue
+        last_in = lead.last_inbound_at or lead.created_at
+        template = send_at >= last_in + timedelta(hours=24)  # the 24-hour window will be closed by then
+        sent = followups_sent(lead)
+        why = (f"Day {stage} follow-up: {max((send_at - last_in).days, 0)} day(s) since their last message with no reply; "
+               f"status {lead.status}; not paused, opted out, closed, an existing client, a partner enquiry or human-handled; "
+               f"{len(sent)} of {FOLLOWUP_MAX_TOTAL} follow-ups sent so far")
+        rows.append({"lead": lead, "stage": stage, "send_at": send_at, "kind": "template" if template else "text",
+                     "template": cfg[templates_meta.TEMPLATES[f"day{stage}"]["env"]] if template else None, "why": why})
+    return rows
 
 
 def run_unanswered(min_age=timedelta(minutes=2)):
@@ -1540,12 +1778,15 @@ def run_due_followups():
     if not whatsapp.is_configured():
         log.warning("WhatsApp not connected; follow-up tick skipped (leads stay queued)")
         return
-    due = (Lead.query.filter(Lead.status.in_(ACTIVE), Lead.followup_paused.is_(False),
+    if not current_app.config["FOLLOWUPS_ENABLED"]:
+        log.info("follow-up tick skipped: FOLLOWUPS_ENABLED=0 (leads stay queued)")
+        return
+    due = (Lead.query.filter(Lead.status.in_(ACTIVE), Lead.followup_paused.is_(False), Lead.opted_out.is_(False),
                              Lead.next_followup_at.isnot(None), Lead.next_followup_at <= utcnow()).all())
     for lead_id in [l.id for l in due]:
         try:
             lead = db.session.get(Lead, lead_id)
-            if lead and lead.status in ACTIVE and not lead.followup_paused:
+            if lead and lead.status in ACTIVE and not lead.followup_paused and not lead.opted_out:
                 send_followup(lead)
         except Exception:
             db.session.rollback()

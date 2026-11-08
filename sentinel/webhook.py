@@ -151,17 +151,19 @@ def receive():
                 recipient = s.get("recipient_id")
                 status = s.get("status")
                 outcome = f"ignored (delivery status '{status}')"
+                msg = Message.query.filter_by(external_id=s.get("id")).first() if s.get("id") else None
                 if status == "failed":
-                    msg = Message.query.filter_by(external_id=s.get("id")).first()
                     if msg:
                         err = (s.get("errors") or [{}])[0]
-                        msg.status = "failed"
-                        msg.error = f"{err.get('title') or err.get('message')} (code {err.get('code')})"[:500]
-                        db.session.commit()
+                        detail = f"{err.get('title') or err.get('message')} (code {err.get('code')})"
+                        service.note_delivery_status(msg, "failed", detail)
                         log.warning("WhatsApp delivery failed for message %s: %s", msg.id, msg.error)
                         outcome = f"failed (delivery failure recorded on message {msg.id}, code {err.get('code')})"
                     else:
                         outcome = "ignored (failed status for an unknown message id)"
+                elif status in ("sent", "delivered", "read") and msg and msg.direction == "outbound":
+                    service.note_delivery_status(msg, status)
+                    outcome = f"recorded (delivery status '{status}' on message {msg.id})"
                 _log_event("status", recipient, phone_id, outcome)
 
     if not seen_any:

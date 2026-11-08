@@ -103,6 +103,8 @@ def test_followup_sequence_day1_3_7_then_cold(app, sent, claude):
             m.sent_at = utcnow() - timedelta(days=stage, hours=1)
         lead.last_inbound_at = utcnow() - timedelta(days=stage, hours=1)
         lead.next_followup_at = utcnow() - timedelta(minutes=1)
+        for m in Message.query.filter_by(direction="outbound"):  # the earlier follow-up went out days ago (20-hour minimum gap)
+            m.sent_at = utcnow() - timedelta(days=stage, hours=2)
         db.session.commit()
         service.run_due_followups()
         kind, to, name, params = sent[-1]
@@ -145,7 +147,7 @@ def test_send_failure_does_not_stop_other_leads(app, sent, claude, monkeypatch):
     first, second = Lead.query.order_by(Lead.id).all()
     assert first.followup_stage == 0 and first.followup_failures == 1
     assert Message.query.filter_by(lead_id=first.id, status="failed").count() == 1
-    assert second.followup_stage == 1 and len(sent) == 1
+    assert second.followup_stage == 1 and len([x for x in sent if x[0] == "template"]) == 1  # (plus one owner alert)
 
 
 def post_form_lead(app):

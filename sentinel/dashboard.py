@@ -204,7 +204,10 @@ def settings():
                         "note": bf.PARTNERSHIP_NOTES.get(name)})
     modes = [("Running commit", (cfg.get("GIT_COMMIT") or "unknown")[:7]),
              ("Bot answers after a lead is ready", "yes" if cfg["BOT_ANSWERS_AFTER_READY"] else "no (old behaviour)"),
-             ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"])]
+             ("Owner takeover window (hours)", cfg["OWNER_TAKEOVER_HOURS"]),
+             ("Automatic follow-ups (FOLLOWUPS_ENABLED)", "on" if cfg["FOLLOWUPS_ENABLED"] else "OFF: none are sent"),
+             ("Follow-up days (FOLLOWUP_STAGES)", ", ".join(str(x) for x in service.followup_stages()) or "none"),
+             ("Follow-up templates per day (FOLLOWUP_DAILY_CAP)", cfg["FOLLOWUP_DAILY_CAP"])]
     todo = [label for label, _, is_todo in facts if is_todo] + [p["label"] for p in partner if p["todo"]]
     return render_template("settings.html", facts=facts, modes=modes, todo=todo,
                            partner_todo=[p for p in partner if p["todo"]], partner_filled=[p for p in partner if not p["todo"]])
@@ -255,6 +258,17 @@ def set_referrer(lead_id):
     return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 
 
+@bp.get("/followups")
+@login_required
+def followups():
+    """Upcoming follow-ups: the leads that would get an automatic follow-up in the next 24 hours. Nothing is sent from here."""
+    cfg = current_app.config
+    rows = service.upcoming_followups(24)
+    return render_template("followups.html", rows=rows, enabled=cfg["FOLLOWUPS_ENABLED"], stages=service.followup_stages(),
+                           cap=cfg["FOLLOWUP_DAILY_CAP"], sent_today=service.template_followups_today(),
+                           mask=service.mask_phone_detail)
+
+
 ACTIONS = {"contacted", "closed_won", "closed_lost", "pause", "resume", "reopen", "existing_client"}
 
 
@@ -280,6 +294,7 @@ def lead_action(lead_id):
         lead.next_followup_at = None
     elif action in ("resume", "reopen"):
         lead.followup_paused = False
+        lead.followups_off = False  # (an opt-out is never lifted from here: only the customer can lift it)
         lead.handback_at = now  # the bot answers again, even if Fredrick wrote within the takeover window
         lead.followup_failures = 0
         if action == "reopen" or lead.status == "cold":
@@ -288,6 +303,8 @@ def lead_action(lead_id):
         lead.next_followup_at = service.next_followup_time(lead)
     db.session.commit()
     flash(f"Updated: {action.replace('_', ' ')}.")
+    if request.form.get("next") == "followups":  # the Pause button on the Upcoming follow-ups page
+        return redirect(url_for("dashboard.followups"))
     return redirect(url_for("dashboard.lead_detail", lead_id=lead.id))
 
 
