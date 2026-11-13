@@ -57,6 +57,8 @@ class Lead(db.Model):
     followups_off = db.Column(db.Boolean, nullable=False, default=False)  # "not interested": no automatic follow-ups, still answerable
     template_error = db.Column(db.String(500))  # Meta's code and message when a template send was rejected (shown in red)
     template_error_at = db.Column(db.DateTime)
+    origin = db.Column(db.String(10), nullable=False, default="inbound")  # inbound / outbound: outbound-origin leads never get the Day 1/3/7 "your inquiry" follow-ups
+    prospect_id = db.Column(db.Integer)  # outbound prospecting: the prospect this lead came from (no foreign key, additive column)
     ai_note = db.Column(db.String(400))  # visible warning when Claude classification last failed; null when fine
 
     messages = db.relationship("Message", back_populates="lead", order_by="Message.sent_at, Message.id",

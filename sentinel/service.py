@@ -238,6 +238,8 @@ def next_followup_time(lead):
     """When the next stage is due, or None if the sequence should not run."""
     if lead.status not in ACTIVE or lead.followup_paused or not lead.phone:
         return None
+    if lead.origin == "outbound":
+        return None  # they never made an inquiry: the "following up on your inquiry" templates would be untrue
     if lead.opted_out or lead.followups_off or lead.partner_enquiry:
         return None  # asked us to stop / not interested / a partner enquiry: no automatic follow-ups
     if lead.is_existing_client and not lead.upgrade_enquiry:
@@ -1743,6 +1745,8 @@ def followup_block_reason(lead, now=None, *, uses_template=True, check_cap=True)
         return Block("disabled", "follow-ups are switched off (FOLLOWUPS_ENABLED=0)")
     if not lead.phone:
         return Block("permanent", "no phone number")
+    if lead.origin == "outbound":
+        return Block("permanent", "outbound-origin lead: the inquiry follow-up sequence does not apply")
     if lead.opted_out or is_opted_out(lead.phone):
         return Block("permanent", "the lead opted out")
     if lead.followups_off:

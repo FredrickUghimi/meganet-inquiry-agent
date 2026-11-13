@@ -93,6 +93,8 @@ def load_config():
         "SMTP_PASSWORD": _env("SMTP_PASSWORD"),
         "ALERT_EMAIL_TO": _env("ALERT_EMAIL_TO"),
         "ALERT_EMAIL_FROM": _env("ALERT_EMAIL_FROM"),
+        # Outbound prospecting: emergency stop forced from the environment (also a database switch on the Outbound page)
+        "OUTBOUND_KILL": _flag("OUTBOUND_KILL", False),
         # Scheduler
         "SCHEDULER_ENABLED": _flag("SCHEDULER_ENABLED", True),
         "FOLLOWUP_CHECK_MINUTES": int(_env("FOLLOWUP_CHECK_MINUTES", "5")),
