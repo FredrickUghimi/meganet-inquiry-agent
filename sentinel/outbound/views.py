@@ -30,14 +30,21 @@ def _from_form(form):
     return changes
 
 
+def _try(fn, default):
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
 @bp.get("/outbound")
 @dashboard.login_required
 def page():
-    values = settings.all_values()
+    values, corrupt = settings._load(False)  # lenient: a corrupt stored value shows its default and a warning, so it can be fixed
     return render_template(
-        "outbound.html", values=values, spec=settings.SPEC, groups=GROUPS, killed=settings.is_killed(),
-        env_kill=bool(current_app.config.get("OUTBOUND_KILL")), counted=counters.counted_sends(),
-        review_pending=counters.review_pending(), spent=spend.month_total(), email_effective=settings.email_auto_effective(),
+        "outbound.html", values=values, corrupt=corrupt, spec=settings.SPEC, groups=GROUPS, killed=settings.is_killed(),
+        env_kill=bool(current_app.config.get("OUTBOUND_KILL")), counted=_try(counters.counted_sends, 0),
+        review_pending=counters.review_pending(), spent=_try(spend.month_total, 0.0), email_effective=settings.email_auto_effective(),
         legal_recorded=settings.legal_advice_recorded(values), approvers=", ".join(settings.APPROVERS),
         suppressed=OptOut.query.filter(OptOut.lifted_at.is_(None)).count(),
         events=AuditEvent.query.order_by(AuditEvent.id.desc()).limit(20).all())

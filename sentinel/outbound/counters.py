@@ -1,6 +1,6 @@
 """The 40-message checkpoint: how many openers have actually been sent, and the owner's 'Reviewed' tap."""
 from ..models import utcnow
-from . import audit, settings
+from . import audit, safety, settings
 from .models import Draft
 
 
@@ -15,6 +15,7 @@ def counted_sends():
     return query.count()
 
 
+@safety.fail_closed(True, "review checkpoint check")
 def review_pending():
     """True once the checkpoint count is reached and the owner has not yet tapped Reviewed."""
     return counted_sends() >= settings.get("gate_count") and not settings.get("review_ack_at")

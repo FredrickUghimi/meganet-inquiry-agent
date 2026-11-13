@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from ..models import utcnow
-from . import settings
+from . import safety, settings
 
 
 def _tz():
@@ -25,6 +25,7 @@ def month_start_utc(now=None):
     return start.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+@safety.fail_closed(False, "send hours check")
 def in_send_hours(now=None):
     """True on a send day, between send_start and send_end (start inclusive, end exclusive), in the outbound time zone."""
     here = local(now)

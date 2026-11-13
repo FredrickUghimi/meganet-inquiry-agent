@@ -25,3 +25,15 @@ def record(action, actor="system", entity=None, entity_id=None, detail=None, com
     else:
         db.session.flush()
     return event
+
+
+def record_safe(action, actor="system", entity=None, entity_id=None, detail=None):
+    """Like record(), but never raises (a broken database, a bad detail): returns the event, or None if it could not be written.
+    Used where the audit entry is a bonus and must not turn a refusal into a crash."""
+    try:
+        return record(action, actor, entity, entity_id, detail)
+    except Exception as exc:
+        from . import safety
+        safety.log_failure("audit write", exc)
+        safety.reset_session()
+        return None

@@ -2,7 +2,7 @@
 from sqlalchemy import func
 
 from ..models import db, utcnow
-from . import audit, clock, settings
+from . import audit, clock, safety, settings
 from .models import OutboundSpend
 
 
@@ -24,6 +24,7 @@ def month_total(now=None):
     return float(total or 0.0)
 
 
+@safety.fail_closed(False, "spend cap check")
 def spend_allowed(extra=0.0, now=None):
     """False once this month's spend has reached the cap, or would pass it with `extra`. A hard stop: no override here."""
     cap = settings.get("spend_cap_usd")

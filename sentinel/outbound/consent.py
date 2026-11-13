@@ -5,7 +5,7 @@ is never a marketing opt-in. Nothing in the inbound path writes here. This modul
 an inbound message, and accepts only the explicit kinds listed below."""
 from ..models import db, utcnow
 from .. import service
-from . import audit
+from . import audit, safety
 from .models import ConsentRecord
 
 # Explicit evidence only. An inbound WhatsApp message is NOT on this list, and unknown kinds are refused.
@@ -53,6 +53,7 @@ def record_withdrawal(phone, channel, actor="owner"):
     db.session.commit()
 
 
+@safety.fail_closed(False, "marketing opt-in check")
 def has_marketing_opt_in(phone, channel="whatsapp"):
     """True only if the latest consent record for this number and channel is an opt-in AND the number is not on the
     do-not-contact list. A number with no record, or whose country is unclear, has none."""

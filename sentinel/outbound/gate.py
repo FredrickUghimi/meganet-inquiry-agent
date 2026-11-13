@@ -11,7 +11,7 @@ from collections import namedtuple
 
 from .. import service
 from ..models import db, utcnow
-from . import audit, clock, consent, counters, settings, spend
+from . import audit, clock, consent, counters, safety, settings, spend
 from .models import Draft, Prospect
 
 Result = namedtuple("Result", "ok code reason")
@@ -24,19 +24,40 @@ CHANNELS = AUTOMATED + MANUAL
 
 
 def _block(draft, code, reason):
-    audit.record("gate.blocked", "system", "draft", getattr(draft, "id", None),
-                 {"code": code, "reason": reason, "channel": getattr(draft, "channel", None)})
+    # the audit entry is a bonus: if it cannot be written the refusal still stands
+    audit.record_safe("gate.blocked", "system", "draft", safety.attr(draft, "id"),
+                      {"code": code, "reason": reason, "channel": safety.attr(draft, "channel")})
     return Result(False, code, reason)
 
 
+GATE_ERROR = "gate_error"
+
+
 def can_send(draft, now=None):
-    """Result(ok, code, reason). Never sends, never changes the draft. A refusal is audited."""
+    """Result(ok, code, reason). Never sends, never changes the draft, NEVER RAISES, and never answers ok=True after an
+    error: any exception (missing table, unreachable database, corrupt setting value, anything) becomes
+    Result(False, "gate_error", ...). The error type is logged (never the message, which may echo phone numbers or text) and,
+    if the database allows, a gate_error audit entry is written; that write can never raise either."""
+    try:
+        return _can_send(draft, now)
+    except Exception as exc:
+        try:
+            safety.log_failure("gate", exc)
+            safety.reset_session()
+            audit.record_safe(GATE_ERROR, "system", "draft", safety.attr(draft, "id"),
+                              {"code": GATE_ERROR, "error_type": type(exc).__name__, "channel": safety.attr(draft, "channel")})
+        except Exception:  # nothing in the error path may raise
+            pass
+        return Result(False, GATE_ERROR, "The gate could not check this message safely, so it was refused.")
+
+
+def _can_send(draft, now=None):
     now = now or utcnow()
     values = settings.all_values()
     channel = draft.channel
     automated = channel in AUTOMATED
 
-    if settings.is_killed():
+    if settings.is_killed.raw():
         return _block(draft, "killed", "The emergency stop is on.")
     if not values["enabled"]:
         return _block(draft, "disabled", "Outbound is switched off.")
@@ -62,14 +83,14 @@ def can_send(draft, now=None):
             return _block(draft, "no_contact", "There is no phone number to check against the do-not-contact list.")
         if service.is_opted_out(phone):
             return _block(draft, "suppressed", "This number is on the do-not-contact list.")
-        if channel == "whatsapp_cloud" and not consent.has_marketing_opt_in(phone, "whatsapp"):
+        if channel == "whatsapp_cloud" and not consent.has_marketing_opt_in.raw(phone, "whatsapp"):
             return _block(draft, "no_opt_in", "There is no recorded marketing opt-in for this number. A message to our "
                                               "WhatsApp line is a service reply only.")
     else:  # email channels: the do-not-contact list is phone-keyed today, so an email cannot be checked yet
         return _block(draft, "email_suppression_missing", "Email addresses cannot be checked against the do-not-contact "
                                                           "list yet, so email is refused.")
 
-    if (automated or channel == "call") and not clock.in_send_hours(now):
+    if (automated or channel == "call") and not clock.in_send_hours.raw(now):
         return _block(draft, "outside_hours", "Outside the send and call hours.")
 
     if draft.status in ("sent", "sending"):
@@ -83,7 +104,7 @@ def can_send(draft, now=None):
     elif draft.status not in ("draft", "approved"):
         return _block(draft, "bad_state", f"A {draft.status} draft cannot be sent.")
 
-    if automated and values["pause_automated_after_gate"] and counters.review_pending():
+    if automated and values["pause_automated_after_gate"] and counters.review_pending.raw():
         return _block(draft, "review_pending", f"{values['gate_count']} openers have been sent: automated sends are "
                                                "paused until you tap Reviewed.")
 
@@ -94,6 +115,6 @@ def can_send(draft, now=None):
     if draft.campaign_id and today.filter(Draft.campaign_id == draft.campaign_id).count() >= values["daily_cap_campaign"]:
         return _block(draft, "cap_campaign", "The daily cap for this campaign is reached.")
 
-    if automated and not spend.spend_allowed(now=now):
+    if automated and not spend.spend_allowed.raw(now=now):
         return _block(draft, "spend_cap", "The monthly spend cap is reached (hard stop).")
     return Result(True, "ok", "Allowed.")

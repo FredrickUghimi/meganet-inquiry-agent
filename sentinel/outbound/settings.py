@@ -9,12 +9,16 @@ from datetime import date, datetime
 from flask import current_app
 
 from ..models import db, utcnow
-from . import audit
+from . import audit, safety
 from .models import OutboundSetting
 
 
 class SettingError(ValueError):
     """A setting value was refused. The message is shown to the owner as it is."""
+
+
+class SettingCorrupt(SettingError):
+    """A stored setting value is not valid JSON or has the wrong type. The gate treats this as an error and refuses."""
 
 
 # key -> (type, default, label). type: bool / int / float / str / date
@@ -96,17 +100,52 @@ def _encode(value):
 
 
 def _decode(key, text):
+    """Stored JSON -> typed value. Anything that is not exactly the declared type is corrupt (for example the string "false"
+    for a switch, which would otherwise count as on)."""
+    kind = SPEC[key][0]
     value = json.loads(text)
-    return date.fromisoformat(value) if SPEC[key][0] == "date" and value else value
+    if kind == "bool" and isinstance(value, bool):
+        return value
+    if kind == "int" and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if kind == "float" and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if kind == "str" and isinstance(value, str):
+        return value
+    if kind == "date":
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+    raise SettingCorrupt(f"the stored value of {key} is corrupt")
 
 
-def all_values():
-    """Every setting with its current value (defaults filled in)."""
+def _load(strict):
+    """(values, corrupt_keys). strict=True raises SettingCorrupt on the first bad row; strict=False uses the default for a bad
+    row and reports its key, so the owner page can still open and the value can be overwritten."""
     rows = {r.key: r for r in OutboundSetting.query.all()}
-    out = {}
+    out, bad = {}, []
     for key, (_, default, _) in SPEC.items():
-        out[key] = _decode(key, rows[key].value) if key in rows else default
-    return out
+        if key not in rows:
+            out[key] = default
+            continue
+        try:
+            out[key] = _decode(key, rows[key].value)
+        except Exception as exc:
+            if strict:
+                raise SettingCorrupt(f"the stored value of {key} is corrupt") from exc
+            out[key] = default
+            bad.append(key)
+    return out, bad
+
+
+def all_values(strict=True):
+    """Every setting with its current value (defaults filled in). Strict by default: a corrupt value raises."""
+    return _load(strict)[0]
+
+
+def corrupt_keys():
+    return _load(False)[1]
 
 
 def get(key):
@@ -116,8 +155,10 @@ def get(key):
     return _decode(key, row.value) if row else SPEC[key][1]
 
 
+@safety.fail_closed(True, "kill switch read")
 def is_killed():
-    """Emergency stop: the database switch OR the OUTBOUND_KILL environment/config flag."""
+    """Emergency stop: the database switch OR the OUTBOUND_KILL environment/config flag. If it cannot be read the answer is
+    "stopped"."""
     return bool(current_app.config.get("OUTBOUND_KILL")) or bool(get("kill"))
 
 
@@ -126,6 +167,7 @@ def legal_advice_recorded(values=None):
     return bool(values["legal_advice_date"] and values["legal_advice_note"])
 
 
+@safety.fail_closed(False, "email switch read")
 def email_auto_effective():
     """Automated email can run only if it is switched on AND legal advice is recorded AND outbound is on and not killed."""
     v = all_values()
@@ -174,7 +216,7 @@ def set_many(changes, actor="owner", today=None):
     locked = [k for k in changes if k in INTERNAL]
     if locked:
         raise SettingError(f"{locked[0]} is set by its own button, not here")
-    current = all_values()
+    current, bad = _load(False)
     merged = dict(current)
     for key, raw in changes.items():
         merged[key] = _parse(key, raw)
@@ -183,11 +225,11 @@ def set_many(changes, actor="owner", today=None):
             and "email_auto" not in changes):
         merged["email_auto"] = False  # (an explicit request to switch email ON without the record is refused below)
     _validate(merged, today)
-    return _save(current, merged, actor)
+    return _save(current, merged, actor, force=bad)
 
 
-def _save(current, merged, actor):
-    changed = [k for k in merged if merged[k] != current[k]]
+def _save(current, merged, actor, force=()):
+    changed = [k for k in merged if merged[k] != current[k] or k in force]
     try:
         for key in changed:
             row = db.session.get(OutboundSetting, key)
@@ -215,9 +257,9 @@ def set_internal(key, value, actor):
     """For the buttons that own an internal key (for example 'Reviewed')."""
     if key not in INTERNAL:
         raise SettingError(f"{key} is not an internal setting")
-    current = all_values()
+    current, bad = _load(False)
     merged = dict(current, **{key: _parse(key, value)})
-    return _save(current, merged, actor)
+    return _save(current, merged, actor, force=bad)
 
 
 def engage_kill(actor="owner"):
@@ -230,8 +272,8 @@ def release_kill(actor="owner"):
 
 
 def _toggle_kill(on, actor):
-    current = all_values()
+    current, bad = _load(False)
     merged = dict(current, kill=on)
-    changed = _save(current, merged, actor)
+    changed = _save(current, merged, actor, force=bad)
     audit.record("kill_switch.engaged" if on else "kill_switch.released", actor, "setting", "kill", {"changed": bool(changed)})
     return changed
