@@ -8,7 +8,7 @@ from sqlalchemy import func
 
 from . import ai, emailer, knowledge, menu, templates_meta, whatsapp
 from . import business_facts, demo
-from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
+from .models import DemoRequest, Lead, Message, OpenQuestion, OptOut, db, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,72 @@ MAX_SEND_FAILURES = 2  # the first attempt and ONE retry of the same follow-up; 
 
 def normalize_phone(raw):
     return re.sub(r"\D", "", raw or "") or None
+
+
+DEFAULT_COUNTRY_CODE = "234"  # Nigeria: a local number such as 0801 234 5678 is read as +234 801 234 5678
+
+
+def opt_key(raw):
+    """The key the opt-out register uses: the number in E.164 form ("+" and digits), or None if there is no number.
+    Country-code numbers are used as they are; "00<cc>..." loses the 00; a Nigerian local number (0 + 10 digits) gets 234."""
+    digits = normalize_phone(raw)
+    if not digits:
+        return None
+    if digits.startswith("00"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = DEFAULT_COUNTRY_CODE + digits[1:]
+    return "+" + digits
+
+
+def is_opted_out(raw_phone):
+    """True if this number is in the do-not-contact register (and not lifted). Works whether or not a lead exists."""
+    key = opt_key(raw_phone)
+    return bool(key and OptOut.query.filter_by(phone=key, lifted_at=None).first())
+
+
+def record_opt_out(raw_phone, at=None, source="inbound"):
+    """Put a number in the register (idempotent; re-activates a lifted row). Does not commit. True if anything changed."""
+    key = opt_key(raw_phone)
+    if not key:
+        return False
+    row = OptOut.query.filter_by(phone=key).first()
+    if row is None:
+        db.session.add(OptOut(phone=key, opted_out_at=at or utcnow(), source=source))
+        db.session.flush()
+        return True
+    if row.lifted_at is not None:
+        row.lifted_at, row.opted_out_at, row.source = None, at or utcnow(), source
+        return True
+    return False
+
+
+def lift_opt_out_record(raw_phone):
+    """The customer clearly asked to start again. Marks the row lifted; never deletes it. Does not commit."""
+    key = opt_key(raw_phone)
+    row = OptOut.query.filter_by(phone=key).first() if key else None
+    if row is not None and row.lifted_at is None:
+        row.lifted_at = utcnow()
+
+
+def sync_lead_opt_out(lead):
+    """If the register says this number opted out, make the lead row say so too (a recreated lead is born opted out)."""
+    key = opt_key(lead.phone)
+    if key and not lead.opted_out:
+        row = OptOut.query.filter_by(phone=key, lifted_at=None).first()
+        if row is not None:
+            lead.opted_out, lead.opted_out_at = True, row.opted_out_at
+
+
+def backfill_opt_outs(source="backfill"):
+    """Copy every opted-out lead into the register. Idempotent; adds rows only, never changes or removes any.
+    Returns the number of rows added."""
+    added = 0
+    for lead in Lead.query.filter(Lead.opted_out.is_(True), Lead.phone.isnot(None)).all():
+        if OptOut.query.filter_by(phone=opt_key(lead.phone)).first() is None:
+            added += bool(record_opt_out(lead.phone, lead.opted_out_at, source))
+    db.session.commit()
+    return added
 
 
 def mask_phone(raw):
@@ -67,6 +133,7 @@ def delete_leads(lead_ids):
     if not ids:
         return totals
     try:
+        backfill_opt_outs("delete_guard")  # any opt-out not yet in the register is saved BEFORE its lead goes
         for model in (OpenQuestion, DemoRequest, Message):  # children first (Postgres enforces the foreign keys)
             model.query.filter(model.lead_id.in_(ids)).delete(synchronize_session=False)
         Lead.query.filter(Lead.id.in_(ids)).delete(synchronize_session=False)
@@ -99,10 +166,12 @@ def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp")
         lead.phone = lead.phone or phone
         lead.email = lead.email or email
         lead.name = lead.name or name
+        sync_lead_opt_out(lead)
         return lead
     lead = Lead(phone=phone, email=email, name=name, source=source)
     db.session.add(lead)
     db.session.flush()
+    sync_lead_opt_out(lead)  # a recreated lead starts opted out if its number is in the register
     return lead
 
 
@@ -141,10 +210,12 @@ def record_inbound(lead, body, channel, external_id=None, at=None, choice_id=Non
     lead.followup_failures = 0
     if lead.status == "cold":
         lead.status = "engaged"
-    if ai.optout_intent(body) == "opt_out" and not lead.opted_out:
+    if ai.optout_intent(body) == "opt_out":
         # marked before the reply pipeline runs, so no follow-up can slip out in between
-        lead.opted_out, lead.opted_out_at = True, at
-        log.info("lead=%s opted out (keyword, recorded on arrival)", lead.id)
+        record_opt_out(lead.phone, at)
+        if not lead.opted_out:
+            lead.opted_out, lead.opted_out_at = True, at
+            log.info("lead=%s opted out (keyword, recorded on arrival)", lead.id)
     lead.next_followup_at = next_followup_time(lead)
     db.session.commit()
     return msg
@@ -207,7 +278,7 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
     """Send and log. Never raises: a failed send is stored as a failed Message. Returns the Message.
     Free-form bot text goes through the repeat guard (not Fredrick's own messages, not templates)."""
     cfg = current_app.config
-    if lead.opted_out and (template or is_followup) and sender != "owner":
+    if (lead.opted_out or is_opted_out(lead.phone)) and (template or is_followup) and sender != "owner":
         # the last line of defence: nothing business-initiated ever goes to a number that asked us to stop
         log.warning("blocked a %s to lead %s: the lead opted out", "template" if template else "follow-up", lead.id)
         blocked = Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body=text or "", sent_at=utcnow(),
@@ -1169,6 +1240,7 @@ def _stop_followups(lead, why):
 def _lift_opt_out(lead, why):
     """A clear request to restart: automatic follow-ups may run again."""
     lead.opted_out, lead.opted_out_at, lead.followups_off = False, None, False
+    lift_opt_out_record(lead.phone)
     lead.next_followup_at = next_followup_time(lead)
     db.session.commit()
     log.info("lead=%s opt-out lifted (%s)", lead.id, why)
@@ -1182,6 +1254,7 @@ def _opt_out_and_confirm(lead, how, dry_run, say):
     say(f"drafted reply text: {text!r}", detail=True)
     if dry_run:
         return "skipped", "dry run: would mark the lead opted out and send the confirmation"
+    record_opt_out(lead.phone)
     if not lead.opted_out:
         lead.opted_out, lead.opted_out_at = True, utcnow()
         log.info("lead=%s opted out (%s)", lead.id, how)
@@ -1618,7 +1691,7 @@ def followup_block_reason(lead, now=None, *, uses_template=True, check_cap=True)
         return Block("disabled", "follow-ups are switched off (FOLLOWUPS_ENABLED=0)")
     if not lead.phone:
         return Block("permanent", "no phone number")
-    if lead.opted_out:
+    if lead.opted_out or is_opted_out(lead.phone):
         return Block("permanent", "the lead opted out")
     if lead.followups_off:
         return Block("permanent", "the lead said they are not interested")

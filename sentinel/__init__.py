@@ -83,6 +83,19 @@ def _add_missing_columns():
             log.info("Added %s.%s column", table, name)
 
 
+def _backfill_opt_outs():
+    """The opt_outs table is created by create_all(). Copy opt-outs that so far lived only on lead rows into it. Adds rows only
+    (idempotent: a second start adds nothing), never touches leads, logs a count and no numbers."""
+    from . import service
+    try:
+        added = service.backfill_opt_outs()
+        if added:
+            log.info("Opt-out register: backfilled %d opt-out(s) from existing leads", added)
+    except Exception:
+        db.session.rollback()
+        log.exception("Opt-out backfill failed; the service keeps running and will retry on the next start")
+
+
 def create_app(overrides=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = Flask(__name__)
@@ -101,6 +114,7 @@ def create_app(overrides=None):
     with app.app_context():
         db.create_all()
         _add_missing_columns()
+        _backfill_opt_outs()
 
     if app.config["SCHEDULER_ENABLED"]:
         from . import scheduler
