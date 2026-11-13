@@ -8,7 +8,7 @@ from sqlalchemy import func
 
 from . import ai, emailer, knowledge, menu, templates_meta, whatsapp
 from . import business_facts, demo
-from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
+from .models import DemoRequest, Lead, Message, OpenQuestion, OptOut, db, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,124 @@ MAX_SEND_FAILURES = 2  # the first attempt and ONE retry of the same follow-up; 
 
 def normalize_phone(raw):
     return re.sub(r"\D", "", raw or "") or None
+
+
+MIN_E164_PLAIN_DIGITS = 11  # plain digits shorter than this cannot be trusted to include a country code
+MIN_SUFFIX_MATCH = 9  # digits that must agree for the fail-safe cross-match between a national-format and an E.164 number
+
+
+def phone_key(raw):
+    """(key, needs_review) for the opt-out register, or (None, False) if there is no number. Never guesses a country.
+
+    Resolved, key is E.164 ("+" and digits, needs_review False):
+      "+2348011111111", "002348011111111", and plain digits that start with a country code, which is how WhatsApp
+      sends numbers (2348011111111) and how this app stores them. Plain digits must be at least 11 long.
+    Unresolved, key is "?" and the digits exactly as given, needs_review True:
+      national format with a leading 0 (08011111111), anything shorter than 11 plain digits, anything over 15 digits.
+      The country is unknown, so nothing is assumed; the row is flagged for Fredrick to look at."""
+    text = str(raw or "")
+    digits = re.sub(r"\D", "", text)
+    if not digits:
+        return None, False
+    if text.strip().startswith("+") and not digits.startswith("0") and 7 <= len(digits) <= 15:
+        return "+" + digits, False
+    if digits.startswith("00") and not digits[2:].startswith("0") and 7 <= len(digits) - 2 <= 15:
+        return "+" + digits[2:], False
+    if not digits.startswith("0") and MIN_E164_PLAIN_DIGITS <= len(digits) <= 15:
+        return "+" + digits, False
+    return "?" + digits, True
+
+
+def opt_key(raw):
+    """The E.164 key for a number, or None when it has none or its country cannot be told (see phone_key)."""
+    key, review = phone_key(raw)
+    return None if review else key
+
+
+def _national(key):
+    """The part of a register key that is the same in national and international form (no country code, no trunk 0)."""
+    digits = key.lstrip("+?")
+    return digits[1:] if digits.startswith("0") else digits
+
+
+def _active_rows(raw_phone):
+    """Active (not lifted) register rows that cover this number: the exact key, plus a fail-safe cross-match between a
+    national-format row and an E.164 number (or the reverse) that agree on their last 9+ digits. Over-blocking is the safe
+    error, so an unresolved row still protects the same person's international number."""
+    key, review = phone_key(raw_phone)
+    if not key:
+        return []
+    active = OptOut.query.filter(OptOut.lifted_at.is_(None))
+    rows = active.filter(OptOut.phone == key).all()
+    if review:
+        n = _national(key)
+        if len(n) >= MIN_SUFFIX_MATCH:
+            rows += [r for r in active.filter(OptOut.phone.like("+%")).all() if r.phone.endswith(n)]
+    else:
+        digits = key.lstrip("+")
+        for r in active.filter(OptOut.phone.like("?%")).all():
+            n = _national(r.phone)
+            if len(n) >= MIN_SUFFIX_MATCH and digits.endswith(n):
+                rows.append(r)
+    return rows
+
+
+def is_opted_out(raw_phone):
+    """True if this number is in the do-not-contact register (and not lifted). Works whether or not a lead exists."""
+    return bool(_active_rows(raw_phone))
+
+
+def record_opt_out(raw_phone, at=None, source="inbound"):
+    """Put a number in the register (idempotent; re-activates a lifted row). Adds to the caller's transaction (flush, no
+    commit), so the opt-out is committed together with whatever the caller commits. True if anything changed."""
+    key, review = phone_key(raw_phone)
+    if not key:
+        return False
+    row = OptOut.query.filter_by(phone=key).first()
+    if row is None:
+        db.session.add(OptOut(phone=key, opted_out_at=at or utcnow(), source=source, needs_review=review))
+        db.session.flush()
+        if review:
+            log.warning("opt-out recorded for a number whose country is unclear (%s); stored as given and flagged for review",
+                        mask_phone(raw_phone))
+        return True
+    if row.lifted_at is not None:
+        row.lifted_at, row.opted_out_at, row.source = None, at or utcnow(), source
+        return True
+    return False
+
+
+def lift_opt_out_record(raw_phone):
+    """The customer clearly asked to start again. Marks the matching rows lifted; never deletes any. No commit."""
+    now = utcnow()
+    for row in _active_rows(raw_phone):
+        row.lifted_at = now
+
+
+def sync_lead_opt_out(lead):
+    """If the register says this number opted out, make the lead row say so too (a recreated lead is born opted out)."""
+    if lead.phone and not lead.opted_out:
+        rows = _active_rows(lead.phone)
+        if rows:
+            lead.opted_out, lead.opted_out_at = True, min(r.opted_out_at for r in rows)
+
+
+def backfill_opt_outs(source="backfill"):
+    """Copy every opted-out lead into the register. Idempotent; adds rows only, never changes or removes any.
+    Returns the number of rows added."""
+    added = 0
+    for lead in Lead.query.filter(Lead.opted_out.is_(True), Lead.phone.isnot(None)).all():
+        key, _ = phone_key(lead.phone)
+        if key and OptOut.query.filter_by(phone=key).first() is None:
+            added += bool(record_opt_out(lead.phone, lead.opted_out_at, source))
+    db.session.commit()
+    return added
+
+
+def register_counts():
+    """(active rows, active rows needing review). Counts only."""
+    active = OptOut.query.filter(OptOut.lifted_at.is_(None))
+    return active.count(), active.filter(OptOut.needs_review.is_(True)).count()
 
 
 def mask_phone(raw):
@@ -67,6 +185,7 @@ def delete_leads(lead_ids):
     if not ids:
         return totals
     try:
+        backfill_opt_outs("delete_guard")  # any opt-out not yet in the register is saved BEFORE its lead goes
         for model in (OpenQuestion, DemoRequest, Message):  # children first (Postgres enforces the foreign keys)
             model.query.filter(model.lead_id.in_(ids)).delete(synchronize_session=False)
         Lead.query.filter(Lead.id.in_(ids)).delete(synchronize_session=False)
@@ -99,10 +218,12 @@ def find_or_create_lead(*, phone=None, email=None, name=None, source="whatsapp")
         lead.phone = lead.phone or phone
         lead.email = lead.email or email
         lead.name = lead.name or name
+        sync_lead_opt_out(lead)
         return lead
     lead = Lead(phone=phone, email=email, name=name, source=source)
     db.session.add(lead)
     db.session.flush()
+    sync_lead_opt_out(lead)  # a recreated lead starts opted out if its number is in the register
     return lead
 
 
@@ -141,10 +262,12 @@ def record_inbound(lead, body, channel, external_id=None, at=None, choice_id=Non
     lead.followup_failures = 0
     if lead.status == "cold":
         lead.status = "engaged"
-    if ai.optout_intent(body) == "opt_out" and not lead.opted_out:
+    if ai.optout_intent(body) == "opt_out":
         # marked before the reply pipeline runs, so no follow-up can slip out in between
-        lead.opted_out, lead.opted_out_at = True, at
-        log.info("lead=%s opted out (keyword, recorded on arrival)", lead.id)
+        record_opt_out(lead.phone, at)
+        if not lead.opted_out:
+            lead.opted_out, lead.opted_out_at = True, at
+            log.info("lead=%s opted out (keyword, recorded on arrival)", lead.id)
     lead.next_followup_at = next_followup_time(lead)
     db.session.commit()
     return msg
@@ -207,7 +330,7 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
     """Send and log. Never raises: a failed send is stored as a failed Message. Returns the Message.
     Free-form bot text goes through the repeat guard (not Fredrick's own messages, not templates)."""
     cfg = current_app.config
-    if lead.opted_out and (template or is_followup) and sender != "owner":
+    if (lead.opted_out or is_opted_out(lead.phone)) and (template or is_followup) and sender != "owner":
         # the last line of defence: nothing business-initiated ever goes to a number that asked us to stop
         log.warning("blocked a %s to lead %s: the lead opted out", "template" if template else "follow-up", lead.id)
         blocked = Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body=text or "", sent_at=utcnow(),
@@ -1169,6 +1292,7 @@ def _stop_followups(lead, why):
 def _lift_opt_out(lead, why):
     """A clear request to restart: automatic follow-ups may run again."""
     lead.opted_out, lead.opted_out_at, lead.followups_off = False, None, False
+    lift_opt_out_record(lead.phone)
     lead.next_followup_at = next_followup_time(lead)
     db.session.commit()
     log.info("lead=%s opt-out lifted (%s)", lead.id, why)
@@ -1182,6 +1306,7 @@ def _opt_out_and_confirm(lead, how, dry_run, say):
     say(f"drafted reply text: {text!r}", detail=True)
     if dry_run:
         return "skipped", "dry run: would mark the lead opted out and send the confirmation"
+    record_opt_out(lead.phone)
     if not lead.opted_out:
         lead.opted_out, lead.opted_out_at = True, utcnow()
         log.info("lead=%s opted out (%s)", lead.id, how)
@@ -1618,7 +1743,7 @@ def followup_block_reason(lead, now=None, *, uses_template=True, check_cap=True)
         return Block("disabled", "follow-ups are switched off (FOLLOWUPS_ENABLED=0)")
     if not lead.phone:
         return Block("permanent", "no phone number")
-    if lead.opted_out:
+    if lead.opted_out or is_opted_out(lead.phone):
         return Block("permanent", "the lead opted out")
     if lead.followups_off:
         return Block("permanent", "the lead said they are not interested")

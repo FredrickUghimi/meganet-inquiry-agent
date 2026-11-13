@@ -67,6 +67,7 @@ NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters ex
     ("demo_requests", "contact_name", "VARCHAR(120)"),
     ("demo_requests", "organisation", "VARCHAR(160)"),
     ("demo_requests", "contact_phone", "VARCHAR(40)"),
+    ("opt_outs", "needs_review", "BOOLEAN NOT NULL DEFAULT FALSE"),
 )
 
 
@@ -81,6 +82,20 @@ def _add_missing_columns():
             db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
             db.session.commit()
             log.info("Added %s.%s column", table, name)
+
+
+def _backfill_opt_outs():
+    """The opt_outs table is created by create_all(). Copy opt-outs that so far lived only on lead rows into it. Adds rows only
+    (idempotent: a second start adds nothing), never touches leads, logs a count and no numbers."""
+    from . import service
+    try:
+        added = service.backfill_opt_outs()
+        active, review = service.register_counts()
+        log.info("Opt-out register: backfilled %d opt-out(s) from existing leads; %d active in total, %d flagged for review "
+                 "(country unclear)", added, active, review)
+    except Exception:
+        db.session.rollback()
+        log.exception("Opt-out backfill failed; the service keeps running and will retry on the next start")
 
 
 def create_app(overrides=None):
@@ -101,6 +116,7 @@ def create_app(overrides=None):
     with app.app_context():
         db.create_all()
         _add_missing_columns()
+        _backfill_opt_outs()
 
     if app.config["SCHEDULER_ENABLED"]:
         from . import scheduler
