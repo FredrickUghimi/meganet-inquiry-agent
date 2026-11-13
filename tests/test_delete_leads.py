@@ -149,7 +149,10 @@ def test_export_writes_all_three_record_types(app, three, tmp_path, capsys):
 def test_deleting_does_not_touch_other_tables(app, three, capsys):
     from sqlalchemy import inspect
     assert set(inspect(db.engine).get_table_names()) == {"leads", "messages", "demo_requests",
-                                                                   "open_questions", "opt_outs"}
+                                                                   "open_questions", "opt_outs",
+                                                                   "outbound_campaigns", "outbound_sources", "outbound_prospects",
+                                                                   "outbound_drafts", "outbound_consents", "outbound_settings",
+                                                                   "outbound_audit", "outbound_review_reports", "outbound_spend"}
 
 
 # --- dashboard -------------------------------------------------------------------------------

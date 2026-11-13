@@ -68,6 +68,8 @@ NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters ex
     ("demo_requests", "organisation", "VARCHAR(160)"),
     ("demo_requests", "contact_phone", "VARCHAR(40)"),
     ("opt_outs", "needs_review", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("leads", "origin", "VARCHAR(10) NOT NULL DEFAULT 'inbound'"),  # inbound / outbound (outbound prospecting)
+    ("leads", "prospect_id", "INTEGER"),
 )
 
 
@@ -109,14 +111,18 @@ def create_app(overrides=None):
     _warn_todo_facts()
     log.info("Lead Sentinel starting, commit=%s", app.config.get("GIT_COMMIT") or "unknown")
     db.init_app(app)
-    from . import dashboard, webhook
+    from . import dashboard, outbound, webhook  # noqa: F401  (importing outbound registers its tables)
+    from .outbound import views as outbound_views
     app.register_blueprint(dashboard.bp)
     app.register_blueprint(webhook.bp)
+    app.register_blueprint(outbound_views.bp)
 
     with app.app_context():
         db.create_all()
         _add_missing_columns()
         _backfill_opt_outs()
+        from .outbound import campaigns
+        campaigns.ensure_campaigns()  # two inactive configuration rows; no prospect data
 
     if app.config["SCHEDULER_ENABLED"]:
         from . import scheduler

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Outbound{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 style="margin-top:0">Outbound prospecting</h2>
+  <p class="mute">Phase 1: foundations only. Nothing is sent from here, and no prospect data is collected.</p>
+  {% if corrupt %}<div class="banner" role="alert"><b>Corrupt stored setting(s): {{ corrupt|join(', ') }}.</b> Outbound refuses to run until they are saved again below.</div>{% endif %}
+  <table>
+    <tr><th>Master switch</th><td>{{ 'ON' if values.enabled else 'OFF (default)' }}</td></tr>
+    <tr><th>Emergency stop</th><td>{% if killed %}<b>ENGAGED</b>{% if env_kill %} (forced by OUTBOUND_KILL){% endif %}{% else %}not engaged{% endif %}</td></tr>
+    <tr><th>Openers sent (counted)</th><td>{{ counted }} of {{ values.gate_count }}</td></tr>
+    <tr><th>Spend this month</th><td>US${{ '%.2f'|format(spent) }} of US${{ '%.2f'|format(values.spend_cap_usd) }} (hard stop)</td></tr>
+    <tr><th>Do-not-contact list</th><td>{{ suppressed }} number(s) (the same list the follow-ups use)</td></tr>
+    <tr><th>Who may approve</th><td>{{ approvers }} only</td></tr>
+    <tr><th>Automated email</th><td>{% if email_effective %}on{% elif legal_recorded %}off{% else %}LOCKED: record legal advice below{% endif %}</td></tr>
+  </table>
+  {% if review_pending %}
+  <div class="banner" role="alert"><b>{{ values.gate_count }} openers sent.</b> Automated sends are paused until you review.
+    <form method="post" action="{{ url_for('outbound.reviewed') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Reviewed</button></form></div>
+  {% endif %}
+  <form method="post" action="{{ url_for('outbound.kill') }}" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    {% if killed and not env_kill %}<input type="hidden" name="action" value="release"><button>Release emergency stop</button>
+    {% elif not killed %}<input type="hidden" name="action" value="engage"><button style="background:#b91c1c;color:#fff">EMERGENCY STOP</button>{% endif %}
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Settings</h2>
+  <form method="post" action="{{ url_for('outbound.save_settings') }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <p><label><input type="checkbox" name="enabled" {% if values.enabled %}checked{% endif %}> <b>{{ spec['enabled'][2] }}</b></label></p>
+    {% for title, keys in groups %}
+    <h3>{{ title }}</h3>
+    {% for key in keys %}
+      {% set kind = spec[key][0] %}
+      <p>{% if kind == 'bool' %}<label><input type="checkbox" name="{{ key }}" {% if values[key] %}checked{% endif %}> {{ spec[key][2] }}</label>
+      {% else %}<label>{{ spec[key][2] }}<br><input name="{{ key }}" value="{{ values[key] if values[key] is not none else '' }}" {% if kind == 'date' %}placeholder="YYYY-MM-DD"{% endif %}></label>{% endif %}</p>
+    {% endfor %}
+    {% endfor %}
+    <button>Save settings</button>
+  </form>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Audit log (latest 20)</h2>
+  <div class="table-scroll"><table>
+    <tr><th>When</th><th>Who</th><th>Action</th><th>On</th></tr>
+    {% for e in events %}<tr><td>{{ e.at|local }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td><td class="mute">{{ e.entity or '' }} {{ e.entity_id or '' }}</td></tr>
+    {% else %}<tr><td colspan="4" class="mute">Nothing yet.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}
