@@ -46,6 +46,7 @@ def main(argv=None):
     app = create_app({"SCHEDULER_ENABLED": False})
     with app.app_context():
         print(f"Opt-outs in the register now: {OptOut.query.filter_by(lifted_at=None).count()}")
+        print(f"  of which flagged for review (country unclear): {OptOut.query.filter_by(lifted_at=None, needs_review=True).count()}")
         print(f"Leads currently flagged opted out: {Lead.query.filter_by(opted_out=True).count()}")
     if args.log:
         with open(args.log, errors="replace") as fh:

@@ -22,37 +22,84 @@ def normalize_phone(raw):
     return re.sub(r"\D", "", raw or "") or None
 
 
-DEFAULT_COUNTRY_CODE = "234"  # Nigeria: a local number such as 0801 234 5678 is read as +234 801 234 5678
+MIN_E164_PLAIN_DIGITS = 11  # plain digits shorter than this cannot be trusted to include a country code
+MIN_SUFFIX_MATCH = 9  # digits that must agree for the fail-safe cross-match between a national-format and an E.164 number
+
+
+def phone_key(raw):
+    """(key, needs_review) for the opt-out register, or (None, False) if there is no number. Never guesses a country.
+
+    Resolved, key is E.164 ("+" and digits, needs_review False):
+      "+2348011111111", "002348011111111", and plain digits that start with a country code, which is how WhatsApp
+      sends numbers (2348011111111) and how this app stores them. Plain digits must be at least 11 long.
+    Unresolved, key is "?" and the digits exactly as given, needs_review True:
+      national format with a leading 0 (08011111111), anything shorter than 11 plain digits, anything over 15 digits.
+      The country is unknown, so nothing is assumed; the row is flagged for Fredrick to look at."""
+    text = str(raw or "")
+    digits = re.sub(r"\D", "", text)
+    if not digits:
+        return None, False
+    if text.strip().startswith("+") and not digits.startswith("0") and 7 <= len(digits) <= 15:
+        return "+" + digits, False
+    if digits.startswith("00") and not digits[2:].startswith("0") and 7 <= len(digits) - 2 <= 15:
+        return "+" + digits[2:], False
+    if not digits.startswith("0") and MIN_E164_PLAIN_DIGITS <= len(digits) <= 15:
+        return "+" + digits, False
+    return "?" + digits, True
 
 
 def opt_key(raw):
-    """The key the opt-out register uses: the number in E.164 form ("+" and digits), or None if there is no number.
-    Country-code numbers are used as they are; "00<cc>..." loses the 00; a Nigerian local number (0 + 10 digits) gets 234."""
-    digits = normalize_phone(raw)
-    if not digits:
-        return None
-    if digits.startswith("00"):
-        digits = digits[2:]
-    elif len(digits) == 11 and digits.startswith("0"):
-        digits = DEFAULT_COUNTRY_CODE + digits[1:]
-    return "+" + digits
+    """The E.164 key for a number, or None when it has none or its country cannot be told (see phone_key)."""
+    key, review = phone_key(raw)
+    return None if review else key
+
+
+def _national(key):
+    """The part of a register key that is the same in national and international form (no country code, no trunk 0)."""
+    digits = key.lstrip("+?")
+    return digits[1:] if digits.startswith("0") else digits
+
+
+def _active_rows(raw_phone):
+    """Active (not lifted) register rows that cover this number: the exact key, plus a fail-safe cross-match between a
+    national-format row and an E.164 number (or the reverse) that agree on their last 9+ digits. Over-blocking is the safe
+    error, so an unresolved row still protects the same person's international number."""
+    key, review = phone_key(raw_phone)
+    if not key:
+        return []
+    active = OptOut.query.filter(OptOut.lifted_at.is_(None))
+    rows = active.filter(OptOut.phone == key).all()
+    if review:
+        n = _national(key)
+        if len(n) >= MIN_SUFFIX_MATCH:
+            rows += [r for r in active.filter(OptOut.phone.like("+%")).all() if r.phone.endswith(n)]
+    else:
+        digits = key.lstrip("+")
+        for r in active.filter(OptOut.phone.like("?%")).all():
+            n = _national(r.phone)
+            if len(n) >= MIN_SUFFIX_MATCH and digits.endswith(n):
+                rows.append(r)
+    return rows
 
 
 def is_opted_out(raw_phone):
     """True if this number is in the do-not-contact register (and not lifted). Works whether or not a lead exists."""
-    key = opt_key(raw_phone)
-    return bool(key and OptOut.query.filter_by(phone=key, lifted_at=None).first())
+    return bool(_active_rows(raw_phone))
 
 
 def record_opt_out(raw_phone, at=None, source="inbound"):
-    """Put a number in the register (idempotent; re-activates a lifted row). Does not commit. True if anything changed."""
-    key = opt_key(raw_phone)
+    """Put a number in the register (idempotent; re-activates a lifted row). Adds to the caller's transaction (flush, no
+    commit), so the opt-out is committed together with whatever the caller commits. True if anything changed."""
+    key, review = phone_key(raw_phone)
     if not key:
         return False
     row = OptOut.query.filter_by(phone=key).first()
     if row is None:
-        db.session.add(OptOut(phone=key, opted_out_at=at or utcnow(), source=source))
+        db.session.add(OptOut(phone=key, opted_out_at=at or utcnow(), source=source, needs_review=review))
         db.session.flush()
+        if review:
+            log.warning("opt-out recorded for a number whose country is unclear (%s); stored as given and flagged for review",
+                        mask_phone(raw_phone))
         return True
     if row.lifted_at is not None:
         row.lifted_at, row.opted_out_at, row.source = None, at or utcnow(), source
@@ -61,20 +108,18 @@ def record_opt_out(raw_phone, at=None, source="inbound"):
 
 
 def lift_opt_out_record(raw_phone):
-    """The customer clearly asked to start again. Marks the row lifted; never deletes it. Does not commit."""
-    key = opt_key(raw_phone)
-    row = OptOut.query.filter_by(phone=key).first() if key else None
-    if row is not None and row.lifted_at is None:
-        row.lifted_at = utcnow()
+    """The customer clearly asked to start again. Marks the matching rows lifted; never deletes any. No commit."""
+    now = utcnow()
+    for row in _active_rows(raw_phone):
+        row.lifted_at = now
 
 
 def sync_lead_opt_out(lead):
     """If the register says this number opted out, make the lead row say so too (a recreated lead is born opted out)."""
-    key = opt_key(lead.phone)
-    if key and not lead.opted_out:
-        row = OptOut.query.filter_by(phone=key, lifted_at=None).first()
-        if row is not None:
-            lead.opted_out, lead.opted_out_at = True, row.opted_out_at
+    if lead.phone and not lead.opted_out:
+        rows = _active_rows(lead.phone)
+        if rows:
+            lead.opted_out, lead.opted_out_at = True, min(r.opted_out_at for r in rows)
 
 
 def backfill_opt_outs(source="backfill"):
@@ -82,10 +127,17 @@ def backfill_opt_outs(source="backfill"):
     Returns the number of rows added."""
     added = 0
     for lead in Lead.query.filter(Lead.opted_out.is_(True), Lead.phone.isnot(None)).all():
-        if OptOut.query.filter_by(phone=opt_key(lead.phone)).first() is None:
+        key, _ = phone_key(lead.phone)
+        if key and OptOut.query.filter_by(phone=key).first() is None:
             added += bool(record_opt_out(lead.phone, lead.opted_out_at, source))
     db.session.commit()
     return added
+
+
+def register_counts():
+    """(active rows, active rows needing review). Counts only."""
+    active = OptOut.query.filter(OptOut.lifted_at.is_(None))
+    return active.count(), active.filter(OptOut.needs_review.is_(True)).count()
 
 
 def mask_phone(raw):

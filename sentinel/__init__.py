@@ -67,6 +67,7 @@ NEW_COLUMNS = (  # added after the first deploy; db.create_all() never alters ex
     ("demo_requests", "contact_name", "VARCHAR(120)"),
     ("demo_requests", "organisation", "VARCHAR(160)"),
     ("demo_requests", "contact_phone", "VARCHAR(40)"),
+    ("opt_outs", "needs_review", "BOOLEAN NOT NULL DEFAULT FALSE"),
 )
 
 
@@ -89,8 +90,9 @@ def _backfill_opt_outs():
     from . import service
     try:
         added = service.backfill_opt_outs()
-        if added:
-            log.info("Opt-out register: backfilled %d opt-out(s) from existing leads", added)
+        active, review = service.register_counts()
+        log.info("Opt-out register: backfilled %d opt-out(s) from existing leads; %d active in total, %d flagged for review "
+                 "(country unclear)", added, active, review)
     except Exception:
         db.session.rollback()
         log.exception("Opt-out backfill failed; the service keeps running and will retry on the next start")

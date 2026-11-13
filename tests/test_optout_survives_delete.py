@@ -32,12 +32,40 @@ def row():
     return OptOut.query.filter_by(phone="+" + PHONE).first()
 
 
-def test_phone_keys_are_e164():
-    assert service.opt_key("2348011111111") == "+2348011111111"
-    assert service.opt_key("+234 801 111 1111") == "+2348011111111"
-    assert service.opt_key("08011111111") == "+2348011111111"
-    assert service.opt_key("002348011111111") == "+2348011111111"
-    assert service.opt_key("") is None and service.opt_key(None) is None
+def test_webhook_digits_and_plus_numbers_give_the_same_key():
+    for raw in ("2348011111111", "+2348011111111", "+234 801 111 1111", "002348011111111", "234-801-111-1111"):
+        assert service.phone_key(raw) == ("+2348011111111", False), raw
+    assert service.phone_key("14155550123") == ("+14155550123", False)  # another country: no Nigeria assumption
+    assert service.phone_key("") == (None, False) and service.phone_key(None) == (None, False)
+
+
+def test_numbers_without_a_clear_country_are_stored_as_given_and_flagged_not_guessed():
+    for raw in ("08011111111", "0801 111 1111", "8011111111", "12345"):
+        key, review = service.phone_key(raw)
+        assert review is True and key == "?" + "".join(c for c in raw if c.isdigit()), raw
+        assert service.opt_key(raw) is None  # never turned into an E.164 key
+    assert not any(service.phone_key(r)[0].startswith("+234") for r in ("08011111111", "8011111111"))
+
+
+def test_an_unclear_number_that_opts_out_is_kept_flagged_and_still_blocks(app, sent):
+    lead = make_lead(phone="08011111111")
+    service.record_opt_out(lead.phone)
+    db.session.commit()
+    r = OptOut.query.one()
+    assert r.phone == "?08011111111" and r.needs_review is True and r.lifted_at is None
+    assert service.register_counts() == (1, 1)
+    service.delete_leads([lead.id])
+    assert OptOut.query.count() == 1
+    assert service.send_whatsapp(make_lead(phone="08011111111"), template="ack", params=["A", "EHR Cloud"]).status == "failed"
+    # fail-safe: the same person arriving later as +234 8011111111 is still protected (over-blocking is the safe error)
+    assert service.is_opted_out("2348011111111")
+    assert sent == []
+
+
+def test_an_unrelated_number_is_not_blocked_by_an_unclear_row(app):
+    service.record_opt_out("08011111111")
+    db.session.commit()
+    assert not service.is_opted_out("2348099999999") and not service.is_opted_out("14155550123")
 
 
 def test_stop_writes_the_register_and_deleting_the_lead_keeps_it(app, sent):
@@ -50,7 +78,7 @@ def test_stop_writes_the_register_and_deleting_the_lead_keeps_it(app, sent):
     assert Lead.query.count() == 0
     after = row()
     assert after is not None and after.lifted_at is None and after.opted_out_at == stamp
-    assert service.is_opted_out(PHONE) and service.is_opted_out("+234 801 111 1111") and service.is_opted_out("08011111111")
+    assert service.is_opted_out(PHONE) and service.is_opted_out("+234 801 111 1111")
 
 
 def test_a_legacy_opt_out_flag_is_saved_to_the_register_before_the_lead_is_deleted(app):
@@ -82,13 +110,16 @@ def test_a_recreated_lead_gets_no_template_or_followup(app, sent):
     assert sent == []
 
 
-def test_a_lead_object_with_a_different_phone_format_is_still_blocked(app, sent):
+def test_a_recreated_lead_with_a_plus_or_spaced_number_is_still_blocked(app, sent):
     lead = make_lead()
     ask_to_stop(lead)
     service.delete_leads([lead.id])
-    other = make_lead(phone="08011111111")  # same person, local format, recreated by hand
+    other = make_lead(phone="+234 801 111 1111")  # same person, typed with a plus and spaces
     msg = service.send_whatsapp(other, template="ack", params=["Amaka", "EHR Cloud"])
     assert msg.status == "failed" and sent == []
+    # national format is not resolved to a country, but the fail-safe cross-match still blocks it
+    local = make_lead(phone="08011111111")
+    assert service.send_whatsapp(local, template="ack", params=["Amaka", "EHR Cloud"]).status == "failed" and sent == []
 
 
 def test_a_customer_who_asks_to_start_again_lifts_it_and_the_row_is_kept(app, sent):
@@ -163,3 +194,97 @@ def test_audit_script_counts_only_and_never_prints_numbers(app, capsys, tmp_path
     out = capsys.readouterr().out
     assert "may already have been lost (estimate from the log): 1" in out
     assert PHONE not in out and "+234" not in out
+
+
+# --- the real inbound path, same transaction, raw delete ---------------------------------------------------------------------
+
+from test_webhook_inbound import post, text_value  # noqa: E402
+
+
+def committed_view(phone_key):
+    """What a SEPARATE connection sees: only committed data. (lead flag, register row exists)."""
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        flag = conn.execute(text("select opted_out from leads where phone = :p"), {"p": PHONE}).scalar()
+        reg = conn.execute(text("select count(*) from opt_outs where phone = :k"), {"k": phone_key}).scalar()
+    return flag, reg
+
+
+@pytest.mark.parametrize("body", ["STOP", "stop", "Unsubscribe", "please stop messaging me"])
+def test_stop_through_the_webhook_writes_the_register_row_immediately(app, sent, claude, body):
+    assert post(app, text_value(PHONE, mid="wamid.s1", body=body)).status_code == 200
+    r = OptOut.query.one()
+    assert r.phone == "+" + PHONE and r.lifted_at is None and r.needs_review is False and r.source == "inbound"
+    assert Lead.query.one().opted_out is True
+
+
+def test_the_register_row_and_the_lead_flag_are_committed_together(app, sent, claude, monkeypatch):
+    """Stop the reply pipeline from running at all: the opt-out must already be committed by record_inbound itself."""
+    from sentinel import webhook
+    monkeypatch.setattr(webhook, "run_async", lambda *a, **k: None)
+    post(app, text_value(PHONE, mid="wamid.s2", body="STOP"))
+    assert committed_view("+" + PHONE) == (1, 1)  # both visible to another connection
+
+
+def test_a_failure_after_the_opt_out_cannot_leave_the_lead_flag_without_the_register_row(app, sent):
+    lead = make_lead()
+    service.record_inbound(lead, "STOP", "whatsapp", external_id="wamid.s3")
+    db.session.rollback()  # nothing is pending: it was all committed together
+    assert committed_view("+" + PHONE) == (1, 1)
+
+
+def test_the_classifier_opt_out_path_also_writes_the_register(app, sent, claude, monkeypatch):
+    """A phrase the fixed patterns miss but the classifier catches goes through _opt_out_and_confirm."""
+    lead = make_lead()
+    db.session.add(Message(lead_id=lead.id, direction="inbound", channel="whatsapp", body="x", external_id="w9"))
+    db.session.commit()
+    service._opt_out_and_confirm(lead, "classifier", False, lambda *a, **k: None)
+    assert OptOut.query.one().phone == "+" + PHONE
+    assert committed_view("+" + PHONE) == (1, 1)
+
+
+def test_a_raw_delete_of_the_lead_row_leaves_the_register_row(app, sent, claude):
+    post(app, text_value(PHONE, mid="wamid.s4", body="STOP"))
+    assert OptOut.query.count() == 1
+    from sqlalchemy import text
+    db.session.execute(text("delete from messages"))
+    db.session.execute(text("delete from leads"))  # raw SQL, bypassing delete_leads and every guard
+    db.session.commit()
+    assert Lead.query.count() == 0
+    assert OptOut.query.one().phone == "+" + PHONE and service.is_opted_out(PHONE)
+
+
+def test_after_a_raw_delete_the_returning_customer_gets_no_template(app, sent, claude):
+    post(app, text_value(PHONE, mid="wamid.s5", body="STOP"))
+    from sqlalchemy import text
+    db.session.execute(text("delete from messages"))
+    db.session.execute(text("delete from leads"))
+    db.session.commit()
+    sent.clear()
+    post(app, text_value(PHONE, mid="wamid.s6", body="Hello, a question about EHR"))
+    lead = Lead.query.one()
+    assert lead.opted_out is True  # born opted out from the register
+    assert service.send_whatsapp(lead, template="ack", params=["A", "EHR Cloud"]).status == "failed"
+    assert not [e for e in sent if e[0] == "template"]
+
+
+def test_the_startup_line_is_counts_only(tmp_path, caplog):
+    import logging
+    from sentinel import create_app
+    caplog.set_level(logging.INFO)
+    cfg = {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 's.db'}", "SCHEDULER_ENABLED": False, "TESTING": True}
+    app = create_app(cfg)
+    with app.app_context():
+        db.session.add_all([Lead(phone=PHONE, opted_out=True, opted_out_at=utcnow()),
+                            Lead(phone="08022222222", opted_out=True, opted_out_at=utcnow())])
+        OptOut.query.delete()
+        db.session.commit()
+    caplog.clear()
+    app2 = create_app(cfg)
+    lines = [r.getMessage() for r in caplog.records if "Opt-out register" in r.getMessage()]
+    assert lines == ["Opt-out register: backfilled 2 opt-out(s) from existing leads; 2 active in total, 1 flagged for review "
+                     "(country unclear)"]
+    assert PHONE not in lines[0] and "08022222222" not in lines[0]
+    with app2.app_context():
+        db.session.remove()
+        db.drop_all()

@@ -130,7 +130,8 @@ class OptOut(db.Model):
     __tablename__ = "opt_outs"
 
     id = db.Column(db.Integer, primary_key=True)
-    phone = db.Column(db.String(32), nullable=False, unique=True, index=True)  # "+" and digits, e.g. +2348012345678
+    phone = db.Column(db.String(34), nullable=False, unique=True, index=True)  # "+" and digits, e.g. +2348012345678; "?" and the digits as given when the country is unclear
     opted_out_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     source = db.Column(db.String(20), nullable=False, default="inbound")  # inbound / backfill / delete_guard
+    needs_review = db.Column(db.Boolean, nullable=False, default=False)  # country unclear: stored as given, not guessed
     lifted_at = db.Column(db.DateTime)  # set only when the customer clearly asked to start again
