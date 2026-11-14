@@ -319,6 +319,18 @@ def resolve_topic(result, latest):
     return topic, name
 
 
+PM_UNAVAILABLE_RE = re.compile(
+    r"\b(task\s+dependenc\w+|dependenc(?:y|ies)\s+(?:between|on|for|of)\s+(?:the\s+)?tasks?|predecessors?|"
+    r"cost(?:ing|s)?\s+(?:from|of|based on|using)\s+(?:the\s+)?(?:time|hours|labou?r)|"
+    r"cost(?:ing)?\s+(?:\w+\s+){0,3}(?:time|hours)\s+(?:against|to|on|per)\s+(?:a\s+|each\s+|the\s+)?(?:projects?|jobs?)|"
+    r"(?:staff|employee|labou?r)\s+(?:time|hours)\s+(?:\w+\s+){0,2}(?:against|to|on)\s+(?:a\s+|each\s+|the\s+)?(?:projects?|jobs?)|"
+    r"time\s+entr(?:y|ies)\s+(?:\w+\s+){0,3}cost\w*|labou?r\s+cost\w*|"
+    r"time\s*-?\s*sheets?\s+(?:reminders?|notifications?|alerts?)|"
+    r"remind\w*\s+(?:\w+\s+){0,4}(?:time\s*-?\s*sheets?|timesheets?|log\s+(?:their\s+)?(?:time|hours))|"
+    r"(?:project|task|time|approval|milestone)\w*\s+(?:\w+\s+){0,3}e-?mail\s+(?:alerts?|notifications?)|"
+    r"e-?mail\s+(?:alerts?|notifications?)\s+(?:\w+\s+){0,3}(?:project|task|time|approval|milestone))", re.I)
+
+
 def topic_flag(topic, latest):
     """(flag, tag) when the topic must go to a person with an owner alert, else (None, None): Academy fees, dates and
     enrolment; every custom-development request; partnership enquiries."""
@@ -328,6 +340,8 @@ def topic_flag(topic, latest):
         return "custom_request", "Software development"
     if topic == "partnership":
         return "unanswered", "Partnership"
+    if topic == "erp" and PM_UNAVAILABLE_RE.search(latest or ""):
+        return "unanswered", "Project Management"
     return None, None
 
 

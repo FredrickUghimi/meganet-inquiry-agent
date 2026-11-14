@@ -45,7 +45,7 @@ def customer_visible_texts():
 
 # --- tiered loading --------------------------------------------------------------------------------------------------
 
-def test_core_and_internal_rules_stay_under_1500_tokens_and_each_section_under_1000():
+def test_core_and_internal_rules_stay_under_1550_tokens_and_each_section_under_1000():
     core = knowledge_base.estimate_tokens(knowledge_base.CORE + business_facts.internal_block())
     assert core < knowledge_base.CORE_TOKEN_BUDGET, core
     for topic, (_, text) in knowledge_base.SECTIONS.items():
@@ -353,7 +353,8 @@ def test_erp_crm_projects_and_branches_agree_with_the_verified_notes():
     core = " ".join(knowledge_base.CORE.split())
     erp = " ".join(knowledge.ERP_CLOUD_KNOWLEDGE.split())
     assert "Customer records carry follow-up dates and notes" in core and "follow-up date, a notes log" in erp
-    assert "Project Management means project costing (no tasks)" in core and "no tasks, schedules or time tracking" in erp
+    assert "Project Management covers projects, tasks and milestones, job costing by project, time tracking with approval" in core
+    assert "Project Management: CONFIRMED" in erp and "optional owner self-approval for one-person firms" in erp
     assert "single space (no multiple branches)" in core and "multiple branches or locations under one business" in erp
     for text in customer_visible_texts().values():
         assert not re.search(r"multi-?branch|multiple branches across|branch management", text, re.I) or "no multiple branches" in text \
@@ -500,3 +501,108 @@ def test_the_token_report_runs_and_shows_the_tiered_prompt_is_cached(capsys):
     mod.main()
     out = capsys.readouterr().out
     assert "EHR Cloud lead, product question" in out and "unsure lead asks about the Academy" in out and "on cache hit" in out
+
+# --- Project Management wording ----------------------------------------------------------------------------------------
+
+PM_BUILT = ("projects, tasks and milestones", "time tracking with approval", "resource planning", "project timeline")
+PM_NOT_YET = ("task dependencies", "costing from time entries", "time-sheet reminders", "email alerts")
+
+
+def test_project_management_facts_are_built_and_not_yet_lists_are_exact():
+    erp = " ".join(knowledge.ERP_CLOUD_KNOWLEDGE.split())
+    core = " ".join(knowledge_base.CORE.split())
+    for item in PM_BUILT + PM_NOT_YET:
+        assert item in erp, item
+    for item in ("projects, tasks and milestones", "job costing by project", "time tracking with approval", "resource planning",
+                 "a timeline") + PM_NOT_YET:
+        assert item in core, item
+    assert "no tasks" not in erp.lower() and "project costing" not in core
+    assert "Never give or imply a date" in erp
+    for name, text in customer_visible_texts().items():
+        flat = " ".join(text.split())
+        assert not re.search(r"no tasks, schedules|no tasks\)|project costing \(no", flat, re.I), name
+
+
+def test_asking_what_project_management_does_uses_the_erp_notes_with_no_alert(chat, cl):
+    cl.classification.update(product="erp_cloud", topic="erp")
+    chat.say("What does Project Management do in ERP Cloud?",
+             turn("It covers projects, tasks and milestones, time tracking with approval, resource planning and a project timeline."))
+    assert "Project Management: CONFIRMED" in system_of(cl.calls[0])
+    assert OpenQuestion.query.count() == 0 and chat.owner_texts() == []
+
+
+def test_asking_about_time_tracking_and_owner_self_approval_is_answered_without_an_alert(chat, cl):
+    cl.classification.update(product="erp_cloud", topic="erp")
+    chat.say("Does it do time tracking? I run a one-person firm, can I approve my own time?",
+             turn("Yes. Time is tracked and approved, and an owner of a one-person firm can optionally approve their own time."))
+    chat.say("So who approves time in a bigger team?", turn("Time entries go through approval."))
+    assert "optional owner self-approval for one-person firms" in " ".join(system_of(cl.calls[0]).split())
+    assert OpenQuestion.query.count() == 0 and chat.owner_texts() == []
+
+
+@pytest.mark.parametrize("question", [
+    "Does Project Management support task dependencies?",
+    "Can it work out project costing from time entries?",
+    "Does it send time-sheet reminders to my staff?",
+    "Will I get email alerts when time needs approval?",
+])
+def test_features_not_available_yet_are_flagged_to_the_owner_with_no_date(chat, cl, question):
+    cl.classification.update(product="erp_cloud", topic="erp")
+    r = chat.say(question, turn("That is not available yet. I have passed your question to the team, who can tell you more."))
+    q = OpenQuestion.query.one()
+    assert q.kind == "unanswered" and q.question.startswith("[Project Management]")
+    assert any("Project Management" in t for t in chat.owner_texts())
+    system = system_of(cl.calls[0])
+    flat_system = " ".join(system.split())
+    assert "not available yet" in flat_system and "Never give or imply a date" in flat_system
+    assert "not available yet" in r[0] and not re.search(r"\b(soon|coming|next (month|quarter|year)|by \w+ 20\d\d)\b", r[0], re.I)
+
+
+def test_job_costing_is_live_and_kept_apart_from_costing_from_time_entries():
+    erp = " ".join(knowledge.ERP_CLOUD_KNOWLEDGE.split())
+    core = " ".join(knowledge_base.CORE.split())
+    assert "tag sales, purchases and expenses to a project or job to see revenue, cost and profit against an optional budget" in erp
+    assert "job costing" in core and "costing from time entries" in core
+    assert "job costing (live) is not costing from time entries, which is not available yet" in erp
+
+
+@pytest.mark.parametrize("question", [
+    "Does Project Management do job costing?",
+    "Can I see project profit in ERP Cloud?",
+    "Can I see revenue and profit per project?",
+    "Can I tag expenses and purchases to a project to see its profit?",
+])
+def test_job_costing_questions_are_answered_with_no_alert(chat, cl, question):
+    cl.classification.update(product="erp_cloud", topic="erp")
+    chat.say(question, turn("Yes. Tag sales, purchases and expenses to a project to see its revenue, cost and profit."))
+    assert "Job costing: tag sales, purchases and expenses" in " ".join(system_of(cl.calls[0]).split())
+    assert OpenQuestion.query.count() == 0 and chat.owner_texts() == []
+
+
+@pytest.mark.parametrize("question", [
+    "Can I cost my staff time against a project?",
+    "Does it do costing from time entries?",
+    "Can it calculate labour cost per project from timesheets?",
+])
+def test_time_entry_costing_questions_say_not_available_yet_and_escalate(chat, cl, question):
+    cl.classification.update(product="erp_cloud", topic="erp")
+    r = chat.say(question, turn("Costing from time entries is not available yet. I have passed your question to the team."))
+    q = OpenQuestion.query.one()
+    assert q.kind == "unanswered" and q.question.startswith("[Project Management]")
+    assert chat.owner_texts()  # the owner is alerted (a wording such as "cost" may also read as a pricing question)
+    assert "not available yet" in r[0] and not re.search(r"\b(soon|coming|next (month|quarter|year))\b", r[0], re.I)
+
+
+def test_pm_regex_separates_job_costing_from_time_entry_costing():
+    for ok in ("What is job costing in ERP Cloud?", "Can I see project profit?", "revenue and cost per project please",
+               "How do I tag a sale to a project?", "project costing with a budget?"):
+        assert ai.topic_flag("erp", ok) == (None, None), ok
+    for bad in ("Can I cost my staff time against a project?", "costing from time entries?", "labour costing per job",
+                "Can I charge employee hours to a project and see the cost?"):
+        assert ai.topic_flag("erp", bad) == ("unanswered", "Project Management"), bad
+
+
+def test_inventory_costing_questions_do_not_trigger_the_project_management_alert():
+    assert ai.topic_flag("erp", "How does weighted-average costing work for stock?") == (None, None)
+    assert ai.topic_flag("erp", "Can I track tasks and milestones?") == (None, None)
+    assert ai.topic_flag("erp", "Does it support task dependencies?") == ("unanswered", "Project Management")

@@ -18,7 +18,7 @@ WEDNESDAY = "Personalised live demos are held every Wednesday at 10:00 AM (WAT),
 # The exact feature sentence of each approved reply: every item was checked against the product code on 2026-11-06.
 FEATURES = {
     "erp_cloud": "It combines accounting and financial reports, sales and invoicing, inventory, purchasing and suppliers, "
-                 "customer records, HR and payroll, project costing, and Business Sentinel, which checks your records for "
+                 "customer records, HR and payroll, project management, and Business Sentinel, which checks your records for "
                  "unusual items whenever you run a scan.",
     "ehr_cloud": "It combines patient records, appointments, doctor consultations, nursing workflows, prescriptions, laboratory "
                  "and radiology, pharmacy, inventory, billing and insurance claims, reports, and Financial Sentinel, which "
@@ -88,7 +88,7 @@ def test_the_unconfirmed_template_lines_were_softened():
     erp, ehr = knowledge.first_reply("erp_cloud", "A"), knowledge.first_reply("ehr_cloud", "A")
     for gone in ("project tracking", "scans your business activity", "issues that need attention", "on a computer or phone"):
         assert gone not in erp
-    assert "project costing" in erp and "whenever you run a scan" in erp
+    assert "project management" in erp and "project costing" not in erp and "whenever you run a scan" in erp
     assert "phone" not in erp.lower() and "runs in a web browser" in erp
     assert "flags unusual billing activity" not in ehr and "flags possible billing problems for you to review" in ehr
     assert "each facility's data stays separate" not in ehr and "each organisation's data stays separate" in ehr
@@ -99,7 +99,7 @@ def test_knowledge_summaries_have_verdicts_and_never_claim_lists():
         assert "Customer-safe module summary" in text and "Never claim (NOT BUILT or UNKNOWN)" in text
         assert "CONFIRMED" in text and "PARTLY" in text
     erp, ehr = knowledge.ERP_CLOUD_KNOWLEDGE, knowledge.EHR_CLOUD_KNOWLEDGE
-    for line in ("Project tracking: PARTLY", "Business Sentinel: PARTLY", "Where it runs: CONFIRMED",
+    for line in ("Project Management: CONFIRMED", "Business Sentinel: PARTLY", "Where it runs: CONFIRMED",
                  "Accounting and financial reports: CONFIRMED", "Sales and purchases flowing into the accounts automatically: CONFIRMED"):
         assert line in erp, line
     for line in ("Patient queues: CONFIRMED", "Online patient booking: CONFIRMED", "NHIS and HMO claims", "Nursing workflows: CONFIRMED",
