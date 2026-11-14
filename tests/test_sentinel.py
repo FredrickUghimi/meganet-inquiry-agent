@@ -10,6 +10,11 @@ from sentinel.knowledge import EHR_CLOUD_KNOWLEDGE, ERP_CLOUD_KNOWLEDGE, PRODUCT
 from sentinel.models import Lead, Message, db, utcnow
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def inbound(app, phone="2348011111111", text="Hi, interested in EHR for my clinic", mid="wamid.in1", ts=None):
     payload = {"entry": [{"changes": [{"value": {
         "contacts": [{"wa_id": phone, "profile": {"name": "Amaka"}}],
@@ -189,7 +194,7 @@ def test_dashboard_requires_login_and_actions(app, sent, claude):
     page = client.get("/leads").data.decode()
     assert "Mega-Net Lead Sentinel" in page and "Amaka" in page
     assert "reply:first_product_reply" in client.get("/leads/1").data.decode()
-    assert client.post("/leads/1/action", data={"action": "pause"}).status_code == 400  # csrf missing
+    assert _csrf_rejected(client.post("/leads/1/action", data={"action": "pause"}))  # csrf missing
     client.post("/leads/1/action", data={"action": "pause", "csrf": "tok"})
     lead = db.session.get(Lead, 1)
     assert lead.followup_paused and lead.next_followup_at is None

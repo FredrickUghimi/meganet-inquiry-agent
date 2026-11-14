@@ -18,6 +18,11 @@ PHONE = "2348011111111"
 TUE_10 = datetime(2026, 11, 17, 9, 0)
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def campaign(key="erp"):
     return Campaign.query.filter_by(key=key).one()
 
@@ -184,7 +189,7 @@ def test_the_owner_page_has_the_emergency_stop(app):
     c = client(app)
     html = c.get("/outbound").data.decode()
     assert "EMERGENCY STOP" in html and "OFF (default)" in html and "owner only" in html
-    assert c.post("/outbound/kill", data={"action": "engage"}).status_code == 400  # CSRF is enforced
+    assert _csrf_rejected(c.post("/outbound/kill", data={"action": "engage"}))  # CSRF is enforced
     assert c.post("/outbound/kill", data={"action": "engage", "csrf": "t"}).status_code == 302
     assert settings.is_killed()
     assert "Release emergency stop" in c.get("/outbound").data.decode()

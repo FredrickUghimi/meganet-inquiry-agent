@@ -26,6 +26,11 @@ PARTNER_REPLY = ("Yes, we have the Mega-Net Referral Partnership Programme. A pa
                  "could introduce?")
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def flat(text):
     return " ".join(text.split())
 
@@ -229,10 +234,10 @@ def test_editing_the_referrer_needs_the_dashboard_login_and_a_csrf_token(chat, c
     chat.say("Hello there", turn("Hi."))
     lead = chat.lead
     anon = app.test_client()
-    assert anon.post(f"/leads/{lead.id}/referrer", data={"csrf": "t", "referrer_name": "X"}).status_code == 400  # no csrf in session
+    assert _csrf_rejected(anon.post(f"/leads/{lead.id}/referrer", data={"csrf": "t", "referrer_name": "X"}))  # no csrf in session
     c = dashboard(app)
-    assert c.post(f"/leads/{lead.id}/referrer", data={"referrer_name": "X"}).status_code == 400  # no token sent
-    assert c.post(f"/leads/{lead.id}/referrer", data={"csrf": "wrong", "referrer_name": "X"}).status_code == 400
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/referrer", data={"referrer_name": "X"}))  # no token sent
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/referrer", data={"csrf": "wrong", "referrer_name": "X"}))
     session_less = app.test_client()
     with session_less.session_transaction() as s:
         s["csrf"] = "t"

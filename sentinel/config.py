@@ -1,7 +1,10 @@
 """Configuration. Everything comes from environment variables; nothing is hardcoded."""
+import hashlib
+import hmac
 import logging
 import os
 import secrets
+from datetime import timedelta
 
 log = logging.getLogger(__name__)
 
@@ -36,8 +39,16 @@ def database_uri():
 def load_config():
     secret_key = _env("SECRET_KEY")
     if not secret_key:
-        secret_key = secrets.token_hex(32)
-        log.warning("SECRET_KEY not set: using a random one. Dashboard sessions reset on every restart.")
+        # A random key per start invalidates every session cookie (and so every CSRF token) on each restart/deploy.
+        # Derive a stable fallback from values that are fixed across restarts instead. Still set SECRET_KEY.
+        seed = _env("DASHBOARD_PASSWORD") or _env("DATABASE_URL")
+        if seed:
+            secret_key = hmac.new(seed.encode(), b"meganet-sentinel-session-key", hashlib.sha256).hexdigest()
+            log.error("SECRET_KEY not set: using a key derived from DASHBOARD_PASSWORD/DATABASE_URL. "
+                      "Set SECRET_KEY in the Render dashboard.")
+        else:
+            secret_key = secrets.token_hex(32)
+            log.warning("SECRET_KEY not set: using a random one. Dashboard sessions reset on every restart.")
 
     return {
         "SECRET_KEY": secret_key,
@@ -46,6 +57,9 @@ def load_config():
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
         "SESSION_COOKIE_SECURE": _flag("SESSION_COOKIE_SECURE", True),
+        # Persistent cookie (survives closing the browser) for this long; the CSRF token lives in the session,
+        # so it has the same lifetime and no separate, shorter time limit.
+        "PERMANENT_SESSION_LIFETIME": timedelta(hours=float(_env("SESSION_LIFETIME_HOURS", "12"))),
         # Which build is running (Render sets RENDER_GIT_COMMIT); shown on the Settings page and logged at start-up
         "GIT_COMMIT": (_env("RENDER_GIT_COMMIT") or _env("SOURCE_VERSION") or _env("GIT_COMMIT") or "")[:40],
         # Dashboard
