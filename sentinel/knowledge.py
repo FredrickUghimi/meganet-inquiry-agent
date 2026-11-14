@@ -175,6 +175,8 @@ Features that exist:
   names the account it went through.
 - Project Management: projects, tasks and milestones; time tracking with approval (an Owner of a one-person firm can optionally
   approve their own time); resource planning; and a project timeline.
+- Job costing: tag sales, purchases and expenses to a project or job to see revenue, cost and profit against an optional budget.
+  This is cost and profit tracking from those transactions. It is not costing from time entries (not available yet).
 - Reports: Profit and Loss, Balance Sheet, Cash Flow, Receivables and Payables with ageing, General Ledger, Trial Balance,
   customer and supplier statements, Sales, Purchase, Expense and Inventory reports. Manual journal entries and reversals
   are available to accounting roles; entries are never edited, only reversed.
@@ -220,8 +222,10 @@ Customer-safe module summary (verified against the ERP code on 2026-11-06; say o
 - HR and payroll: CONFIRMED. Employee records, departments and positions, leave requests with approve or reject; monthly
   payroll runs with PAYE, pension and NHF, payslip PDFs, and posting to the accounts. Caveat: see the payroll gaps below.
 - Project Management: CONFIRMED. Projects, tasks and milestones; time tracking with approval, including optional owner
-  self-approval for one-person firms; resource planning; a project timeline. Caveat: task dependencies, costing from time
-  entries, time-sheet reminders and email alerts are not available yet. Say so plainly, give no date, and tell the prospect
+  self-approval for one-person firms; resource planning; a project timeline. Job costing is live: tag sales, purchases and
+  expenses to a project to see its revenue, cost and profit against an optional budget. Keep the two apart: job costing
+  (live) is not costing from time entries, which is not available yet. Caveat: task dependencies, costing from time
+  entries (labour costing), time-sheet reminders and email alerts are not available yet. Say so plainly, give no date, and tell the prospect
   the team will be told about the question.
 - Business Sentinel: PARTLY. Five rule-based checks that flag unusual items. Caveat: it runs when someone presses Scan (not
   automatically), it does not use AI, and its findings are not yet visible to the AI Business Assistant.

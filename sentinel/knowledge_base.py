@@ -39,9 +39,9 @@ Products and services (beyond these lines: the product knowledge, or the team wi
 networks, used in a web browser. Financial Sentinel flags possible billing problems with rule-based detection; AI only \
 writes the explanations, when the AI service is configured.
 - Mega-Net ERP Cloud: cloud business management and accounting for small and medium businesses, used in a web browser. \
-Customer records carry follow-up dates and notes, Project Management covers projects, tasks and milestones, time tracking \
-with approval, resource planning and a project timeline (not available yet: task dependencies, costing from time entries, \
-time-sheet reminders, email alerts), each business is a \
+Customer records carry follow-up dates and notes, Project Management covers projects, tasks and milestones, job costing \
+by project, time tracking with approval, resource planning and a timeline (not available yet: task \
+dependencies, costing from time entries, time-sheet reminders, email alerts), each business is a \
 single space (no multiple branches), and Business Sentinel runs five rule-based checks when a user presses Scan.
 - HospitalPro: hospital management software installed on a facility's own local network (EHR Cloud is cloud-based).
 - Revenue Guard: healthcare revenue assurance: finds revenue leakage.

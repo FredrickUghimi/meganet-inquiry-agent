@@ -321,8 +321,11 @@ def resolve_topic(result, latest):
 
 PM_UNAVAILABLE_RE = re.compile(
     r"\b(task\s+dependenc\w+|dependenc(?:y|ies)\s+(?:between|on|for|of)\s+(?:the\s+)?tasks?|predecessors?|"
-    r"(?:project|job)\s+costing|cost(?:ing|s)?\s+(?:from|of|based on|using)\s+(?:the\s+)?(?:time|hours|labou?r)|"
-    r"labou?r\s+cost\w*|time\s*-?\s*sheets?\s+(?:reminders?|notifications?|alerts?)|"
+    r"cost(?:ing|s)?\s+(?:from|of|based on|using)\s+(?:the\s+)?(?:time|hours|labou?r)|"
+    r"cost(?:ing)?\s+(?:\w+\s+){0,3}(?:time|hours)\s+(?:against|to|on|per)\s+(?:a\s+|each\s+|the\s+)?(?:projects?|jobs?)|"
+    r"(?:staff|employee|labou?r)\s+(?:time|hours)\s+(?:\w+\s+){0,2}(?:against|to|on)\s+(?:a\s+|each\s+|the\s+)?(?:projects?|jobs?)|"
+    r"time\s+entr(?:y|ies)\s+(?:\w+\s+){0,3}cost\w*|labou?r\s+cost\w*|"
+    r"time\s*-?\s*sheets?\s+(?:reminders?|notifications?|alerts?)|"
     r"remind\w*\s+(?:\w+\s+){0,4}(?:time\s*-?\s*sheets?|timesheets?|log\s+(?:their\s+)?(?:time|hours))|"
     r"(?:project|task|time|approval|milestone)\w*\s+(?:\w+\s+){0,3}e-?mail\s+(?:alerts?|notifications?)|"
     r"e-?mail\s+(?:alerts?|notifications?)\s+(?:\w+\s+){0,3}(?:project|task|time|approval|milestone))", re.I)
