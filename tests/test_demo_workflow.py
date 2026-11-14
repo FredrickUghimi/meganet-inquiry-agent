@@ -86,7 +86,7 @@ def test_not_offered_agrees_with_knowledge(app):
     assert "turns it on per organization" not in EHR_CLOUD_KNOWLEDGE
     assert "24/7 live technical support" in business_facts.NOT_OFFERED and "no 24/7 live technical support" in EHR_CLOUD_KNOWLEDGE
     assert "24/7" not in PRODUCT_NOTES and "24/7" not in ERP_CLOUD_KNOWLEDGE
-    assert "reminder" not in ERP_CLOUD_KNOWLEDGE.lower()
+    assert "reminder" not in ERP_CLOUD_KNOWLEDGE.lower().replace("time-sheet reminders", "")  # Project Management, not SMS
 
 
 # --- validation: Wednesdays only -----------------------------------------------------------------

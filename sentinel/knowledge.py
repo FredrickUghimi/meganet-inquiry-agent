@@ -173,8 +173,8 @@ Features that exist:
   and purchase returns (credit note or cash refund), with PDF download. The business logo and name appear on the PDFs.
 - Banking: several bank and cash accounts with opening balances, statements and a position view; every money movement
   names the account it went through.
-- Projects: tag sales, purchases and expenses to a project or job to see revenue, cost and profit against an optional budget.
-  This is cost and profit tracking only.
+- Project Management: projects, tasks and milestones; time tracking with approval (an Owner of a one-person firm can optionally
+  approve their own time); resource planning; and a project timeline.
 - Reports: Profit and Loss, Balance Sheet, Cash Flow, Receivables and Payables with ageing, General Ledger, Trial Balance,
   customer and supplier statements, Sales, Purchase, Expense and Inventory reports. Manual journal entries and reversals
   are available to accounting roles; entries are never edited, only reversed.
@@ -219,15 +219,17 @@ Customer-safe module summary (verified against the ERP code on 2026-11-06; say o
   Caveat: there are no deal values, forecasts or drag-and-drop boards. Call it "lead tracking", not a pipeline product.
 - HR and payroll: CONFIRMED. Employee records, departments and positions, leave requests with approve or reject; monthly
   payroll runs with PAYE, pension and NHF, payslip PDFs, and posting to the accounts. Caveat: see the payroll gaps below.
-- Project tracking: PARTLY. Projects are job costing: tag sales, purchases and expenses to a project to see its revenue,
-  cost and profit against an optional budget. Caveat: no tasks, schedules or time tracking.
+- Project Management: CONFIRMED. Projects, tasks and milestones; time tracking with approval, including optional owner
+  self-approval for one-person firms; resource planning; a project timeline. Caveat: task dependencies, costing from time
+  entries, time-sheet reminders and email alerts are not available yet. Say so plainly, give no date, and tell the prospect
+  the team will be told about the question.
 - Business Sentinel: PARTLY. Five rule-based checks that flag unusual items. Caveat: it runs when someone presses Scan (not
   automatically), it does not use AI, and its findings are not yet visible to the AI Business Assistant.
 - Where it runs: CONFIRMED. A web app used in a web browser. Say only that it runs in a web browser;
   say nothing about phones, tablets, apps or app stores.
 - Sales and purchases flowing into the accounts automatically: CONFIRMED (also expenses, payments, returns and payroll).
 Never claim (NOT BUILT or UNKNOWN): multiple branches or locations under one business (each business is one isolated space);
-tasks, scheduling or time tracking on projects; any mobile app, offline use or an installable app; AI inside Business
+task dependencies, costing from time entries, time-sheet reminders or email alerts in Project Management (never give a date); any mobile app, offline use or an installable app; AI inside Business
 Sentinel; scans that run by themselves; automatic follow-up prompts or messages to customers; deal values, forecasting or
 a drag-and-drop sales pipeline; manual stock adjustments, stocktakes or stock transfers; emailing invoices or statements as
 attachments; MFA; NSITF or ITF levies, overtime, loans, part-month proration or automatic filing of PAYE; that it is
@@ -269,7 +271,7 @@ Confirmed NOT built yet (say so plainly if asked, do not imply it exists or is c
 - Notification settings screen, overdue-item notifications.
 - Payroll: NSITF/ITF levies, NHIS and life-assurance reliefs, overtime, part-month proration, loans, and automatic filing or
   remittance of PAYE or pension.
-- Project tasks, scheduling and time tracking.
+- Project Management: task dependencies, costing from time entries, time-sheet reminders and email alerts. Never give or imply a date.
 - Cash Flow shows operating activities only (no fixed assets, loans or equity flows). There are no year-end closing entries.
 - Historical inventory valuation (the Inventory Report is current stock only).
 - Automatic or scheduled background work: Business Sentinel scans only when someone runs it, and Sentinel findings are not
@@ -292,7 +294,7 @@ OFFER_LINE_RE = r"personali[sz]ed\s+live\s+demos?\s+(are\s+)?held"
 ERP_FIRST_REPLY = """\
 {opening} Thank you for your interest in Mega-Net ERP Cloud.
 
-Mega-Net ERP Cloud is cloud-based business management and accounting software that brings your day-to-day operations into one place. It combines accounting and financial reports, sales and invoicing, inventory, purchasing and suppliers, customer records, HR and payroll, project costing, and Business Sentinel, which checks your records for unusual items whenever you run a scan.
+Mega-Net ERP Cloud is cloud-based business management and accounting software that brings your day-to-day operations into one place. It combines accounting and financial reports, sales and invoicing, inventory, purchasing and suppliers, customer records, HR and payroll, project management, and Business Sentinel, which checks your records for unusual items whenever you run a scan.
 
 The modules work together, so your sales and purchases flow into the accounting automatically, and it runs in a web browser.
 

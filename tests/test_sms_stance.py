@@ -31,6 +31,8 @@ def test_no_contradictory_or_denying_sms_line_anywhere():
     for name, text in texts.items():
         for m in re.finditer(r"[^.]*\b(SMS|reminders?)\b[^.]*\.", flat(text.replace('"', ""))):
             sentence = m.group(0).lower()
+            if "time-sheet reminders" in sentence:  # Project Management wording, unrelated to SMS
+                continue
             if "owner" in sentence or "reminder_" in sentence:  # the owner-reminder feature is unrelated
                 continue
             if "never say" in sentence:  # an instruction forbidding such wording is not a denial
@@ -43,7 +45,8 @@ def test_no_contradictory_or_denying_sms_line_anywhere():
 def test_ai_text_agrees_and_ehr_only():
     assert "built into EHR Cloud but is not active by default and works only once an SMS gateway is connected" in ai.REPLY_RULES
     assert "never say it does not exist" in ai.REPLY_RULES and "It is not part of ERP Cloud" in ai.REPLY_RULES
-    assert "sms" not in knowledge.ERP_CLOUD_KNOWLEDGE.lower() and "reminder" not in knowledge.ERP_CLOUD_KNOWLEDGE.lower()
+    erp_notes = knowledge.ERP_CLOUD_KNOWLEDGE.lower().replace("time-sheet reminders", "")  # Project Management, not SMS
+    assert "sms" not in erp_notes and "reminder" not in erp_notes
     assert ("SMS features (patient SMS and appointment reminders) are not active out of the box. They work only once an "
             "SMS gateway is connected.") in business_facts.NOT_OFFERED
     assert "unavailable" not in business_facts.NOT_OFFERED.lower()

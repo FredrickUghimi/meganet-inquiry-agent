@@ -115,7 +115,7 @@ def test_first_reply_checks_catch_each_failure():
     assert "no other product's video" in failed(good.replace(own, other))
     assert "Wednesday live-demo offer" in failed(good.replace(knowledge.demo_line(), ""))
     assert "only confirmed features" in failed(good.replace("HR and payroll", "Branch management across all your locations"))
-    assert "only confirmed features" in failed(good.replace("project costing", "project tracking"))
+    assert "only confirmed features" in failed(good.replace("project management", "project tracking"))
     assert "only confirmed features" in failed(good.replace("one place", "one comprehensive place"))
     assert "approved feature sentence kept" in failed(good.replace("HR and payroll", "payroll"))
     assert any(n.startswith(f"under {knowledge.FIRST_REPLY_MAX_WORDS}") for n in failed(good + " word" * 40))
