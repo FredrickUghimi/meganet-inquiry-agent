@@ -16,6 +16,8 @@
   header .wrap { display:flex; align-items:center; gap:16px; height:56px; }
   header h1 { font-size:17px; margin:0; flex:1; }
   header a { color:var(--ink); text-decoration:none; }
+  .nav { display:flex; align-items:center; gap:16px; }
+  .nav form { margin:0; }
   main { padding:24px 0 48px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
   table { width:100%; border-collapse:collapse; }
@@ -45,14 +47,74 @@
   .msg.failed { border-color:#f04438; }
   .meta { font-size:12px; color:var(--mute); margin-top:4px; }
   .actions form { display:inline; }
-  .filters a { margin-right:10px; }
-  @media (max-width:600px) { .msg { max-width:95%; } }
+  .filters { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:0 14px; border-radius:99px;
+    border:1px solid var(--line); background:var(--card); color:var(--ink); text-decoration:none; font-size:14px; text-transform:capitalize; }
+  .chip .n { font-size:12px; color:var(--mute); font-variant-numeric:tabular-nums; }
+  .chip.active { background:var(--brand); border-color:var(--brand); color:#fff; font-weight:600; }
+  .chip.active .n { color:rgba(255,255,255,.85); }
+  .chip.urgent { border-color:#f04438; color:#b42318; font-weight:600; }
+  .chip.urgent .n { background:#f04438; color:#fff; border-radius:99px; padding:0 7px; }
+  .chip.urgent.active { background:#d92d20; border-color:#d92d20; color:#fff; }
+  .chip.urgent.active .n { background:#fff; color:#b42318; }
+  @media (prefers-color-scheme: dark) { .chip.urgent { color:#fda29b; } }
+  .phone { overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+  .b-wait { background:#fee2e2; color:#b91c1c; border-color:#fca5a5; }
+  .b-opt { background:#1f2937; color:#fff; border-color:#374151; }
+  .b-partner { background:#ede9fe; color:#5b21b6; border-color:#c4b5fd; }
+  .lead-cards { display:none; }
+  .lead-card { position:relative; margin-bottom:10px; padding:14px; }
+  .lead-card .top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .lead-card a.open { font-weight:600; font-size:16px; text-decoration:none; overflow-wrap:anywhere; }
+  .lead-card a.open::after { content:""; position:absolute; inset:0; border-radius:10px; }
+  .lead-card .tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .lead-card .sel { position:relative; z-index:2; }
+  .lead-card .sel input { width:24px; height:24px; }
+  code, pre { overflow-wrap:anywhere; white-space:pre-wrap; }
+  table.kv th { width:40%; }
+  @media (max-width:700px) {
+    .wrap { padding:0 12px; }
+    main { padding:14px 0 32px; }
+    header .wrap { flex-wrap:wrap; height:auto; gap:0; padding-top:6px; }
+    header h1 { flex:1 1 100%; font-size:16px; line-height:36px; }
+    .nav { flex:1 1 100%; min-width:0; overflow-x:auto; gap:4px; white-space:nowrap; -webkit-overflow-scrolling:touch;
+      padding-bottom:6px; scrollbar-width:none; }
+    .nav::-webkit-scrollbar { display:none; }
+    .nav a, .nav button { min-height:44px; display:inline-flex; align-items:center; padding:0 14px; border-radius:8px; flex:none; }
+    .nav a { border:1px solid var(--line); }
+    button, .btn { min-height:44px; }
+    input, select, textarea { min-height:44px; font-size:16px; }
+    input[type=checkbox] { min-height:0; width:22px; height:22px; }
+    .filters { flex-wrap:nowrap; overflow-x:auto; padding-bottom:6px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    .filters::-webkit-scrollbar { display:none; }
+    .chip { flex:none; min-height:44px; }
+    .lead-table { display:none; }
+    .lead-cards { display:block; }
+    .card { padding:14px; }
+    .msg { max-width:95%; }
+    th, td { overflow-wrap:anywhere; }
+    table.kv th, table.kv td { display:block; width:auto; border-bottom:0; padding:6px 0 0; }
+    table.kv td { padding:0 0 10px; border-bottom:1px solid var(--line); }
+    table.stack tr:first-child:has(th) { display:none; }
+    table.stack, table.stack tbody { display:block; }
+    table.stack tr { display:block; padding:10px 0; border-bottom:1px solid var(--line); }
+    table.stack td { display:flex; gap:12px; justify-content:space-between; border:0; padding:3px 0; text-align:right; }
+    table.stack td::before { content:attr(data-label); color:var(--mute); font-size:12px; text-transform:uppercase;
+      letter-spacing:.04em; text-align:left; flex:none; }
+    table.stack td[colspan] { display:block; text-align:left; }
+    table.stack td[colspan]::before { content:none; }
+    .actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .actions form, .actions .btn, .actions > span { display:block; }
+    .actions button, .actions .btn { width:100%; text-align:center; }
+    .actions > span { grid-column:1 / -1; }
+  }
 </style>
 </head>
 <body>
 <header><div class="wrap">
   <h1><a href="{{ url_for('dashboard.leads') }}">Mega-Net Lead Sentinel</a></h1>
   {% if session.get('auth') %}
+  <nav class="nav" aria-label="Main menu">
     <a href="{{ url_for('dashboard.new_inquiry') }}">Log inquiry</a>
     <a href="{{ url_for('dashboard.demos') }}">Demos</a>
     <a href="{{ url_for('dashboard.followups') }}">Follow-ups</a>
@@ -61,6 +123,7 @@
     <form method="post" action="{{ url_for('dashboard.logout') }}" style="margin:0">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}"><button>Log out</button>
     </form>
+  </nav>
   {% endif %}
 </div></header>
 <main><div class="wrap">

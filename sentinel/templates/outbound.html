@@ -5,7 +5,7 @@
   <h2 style="margin-top:0">Outbound prospecting</h2>
   <p class="mute">Phase 1: foundations only. Nothing is sent from here, and no prospect data is collected.</p>
   {% if corrupt %}<div class="banner" role="alert"><b>Corrupt stored setting(s): {{ corrupt|join(', ') }}.</b> Outbound refuses to run until they are saved again below.</div>{% endif %}
-  <table>
+  <table class="kv">
     <tr><th>Master switch</th><td>{{ 'ON' if values.enabled else 'OFF (default)' }}</td></tr>
     <tr><th>Emergency stop</th><td>{% if killed %}<b>ENGAGED</b>{% if env_kill %} (forced by OUTBOUND_KILL){% endif %}{% else %}not engaged{% endif %}</td></tr>
     <tr><th>Openers sent (counted)</th><td>{{ counted }} of {{ values.gate_count }}</td></tr>
@@ -42,9 +42,9 @@
 </div>
 <div class="card">
   <h2 style="margin-top:0">Audit log (latest 20)</h2>
-  <div class="table-scroll"><table>
+  <div class="table-scroll"><table class="stack">
     <tr><th>When</th><th>Who</th><th>Action</th><th>On</th></tr>
-    {% for e in events %}<tr><td>{{ e.at|local }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td><td class="mute">{{ e.entity or '' }} {{ e.entity_id or '' }}</td></tr>
+    {% for e in events %}<tr><td data-label="When">{{ e.at|local }}</td><td data-label="Who">{{ e.actor }}</td><td data-label="Action">{{ e.action }}</td><td class="mute" data-label="On">{{ e.entity or '' }} {{ e.entity_id or '' }}</td></tr>
     {% else %}<tr><td colspan="4" class="mute">Nothing yet.</td></tr>{% endfor %}
   </table></div>
 </div>

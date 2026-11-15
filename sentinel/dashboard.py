@@ -173,8 +173,14 @@ def leads():
         rows = [l for l in rows if service.reply_wait_since(l) is not None]
     rows.sort(key=lambda l: l.status != "ready")  # stable: ready leads float to the top
     rows.sort(key=lambda l: service.reply_wait_since(l) is None)  # then leads waiting for Fredrick above all
+    # Chip counts (display only): one pass over every lead.
+    everyone = Lead.query.all()
+    counts = {"all": len(everyone), "partner": sum(1 for l in everyone if l.partner_enquiry),
+              "needs_reply": sum(1 for l in everyone if service.reply_wait_since(l) is not None)}
+    for s_ in STATUS_ORDER:
+        counts[s_] = sum(1 for l in everyone if l.status == s_)
     return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status, partners=partners,
-                           select=request.args.get("select") == "1")
+                           select=request.args.get("select") == "1", counts=counts)
 
 
 @bp.get("/demos")
