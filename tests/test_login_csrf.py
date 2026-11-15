@@ -66,3 +66,52 @@ def test_secret_key_is_stable_across_restarts_when_unset(monkeypatch):
     assert load_config()["SECRET_KEY"] == load_config()["SECRET_KEY"]
     monkeypatch.setenv("SECRET_KEY", "explicit")
     assert load_config()["SECRET_KEY"] == "explicit"
+
+
+def test_fallback_key_is_hmac_of_the_seed_never_the_raw_value(monkeypatch, caplog):
+    import hashlib
+    import hmac
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "hunter2-password")
+    with caplog.at_level("DEBUG"):
+        key = load_config()["SECRET_KEY"]
+    expected = hmac.new(b"hunter2-password", b"meganet-sentinel-session-key", hashlib.sha256).hexdigest()
+    assert key == expected and key != "hunter2-password" and "hunter2-password" not in key
+    assert "SECRET_KEY not set" in caplog.text
+    assert key not in caplog.text and "hunter2-password" not in caplog.text  # log never leaks key or source
+
+
+def test_fallback_key_from_database_url_is_not_the_url_and_differs_per_seed(monkeypatch, caplog):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgres://user:s3cretpw@host/db")
+    with caplog.at_level("DEBUG"):
+        a = load_config()["SECRET_KEY"]
+    assert "s3cretpw" not in a and "postgres://" not in a and a not in caplog.text
+    assert "s3cretpw" not in caplog.text and "postgres://" not in caplog.text
+    monkeypatch.setenv("DATABASE_URL", "postgres://user:other@host/db")
+    assert load_config()["SECRET_KEY"] != a
+
+
+def test_production_cookie_flags_and_lifetime(monkeypatch):
+    from datetime import timedelta
+    monkeypatch.delenv("SESSION_COOKIE_SECURE", raising=False)
+    monkeypatch.delenv("SESSION_LIFETIME_HOURS", raising=False)
+    cfg = load_config()
+    assert cfg["SESSION_COOKIE_SECURE"] is True  # Secure unless explicitly turned off for local http
+    assert cfg["SESSION_COOKIE_HTTPONLY"] is True and cfg["SESSION_COOKIE_SAMESITE"] == "Lax"
+    assert cfg["PERMANENT_SESSION_LIFETIME"] == timedelta(hours=12)
+
+
+def test_login_cookie_carries_secure_httponly_samesite_and_12h_expiry(app):
+    from datetime import datetime, timedelta, timezone
+    from email.utils import parsedate_to_datetime
+    app.config["SESSION_COOKIE_SECURE"] = True
+    r = app.test_client().get("/login", base_url="https://sentinel.test")
+    cookie = next(h for h in r.headers.getlist("Set-Cookie") if h.startswith("session="))
+    for flag in ("Secure", "HttpOnly", "SameSite=Lax"):
+        assert flag in cookie
+    expires = parsedate_to_datetime(cookie.split("Expires=")[1].split(";")[0])
+    left = expires - datetime.now(timezone.utc)
+    assert timedelta(hours=11, minutes=55) < left <= timedelta(hours=12)
