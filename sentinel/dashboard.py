@@ -5,7 +5,8 @@ import secrets
 from functools import wraps
 from zoneinfo import ZoneInfo
 
-from flask import (Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for)
+from flask import (Blueprint, abort, current_app, flash, make_response, redirect, render_template, request, session,
+                   url_for)
 
 from . import service, whatsapp
 from .models import DemoRequest, Lead, Message, OpenQuestion, db, utcnow
@@ -30,6 +31,7 @@ def login_required(view):
 def csrf_token():
     if "csrf" not in session:
         session["csrf"] = secrets.token_hex(16)
+    session.permanent = True  # persistent cookie with PERMANENT_SESSION_LIFETIME, not a browser-session cookie
     return session["csrf"]
 
 
@@ -38,7 +40,10 @@ def check_csrf():
     if request.method == "POST":
         sent = request.form.get("csrf", "")
         if not sent or not hmac.compare_digest(sent, session.get("csrf", "")):
-            abort(400, "Bad CSRF token")
+            # Still rejected (nothing is processed), but never show a raw "Bad Request" page.
+            log.info("CSRF check failed for %s %s", request.method, request.path)
+            flash("Your session expired. Please sign in again.")
+            return redirect(url_for("dashboard.login"))
 
 
 @bp.app_template_filter("local")
@@ -76,11 +81,16 @@ def login():
         given = request.form.get("password", "")
         if expected and hmac.compare_digest(given.encode(), expected.encode()):
             session.clear()
+            session.permanent = True
             session["auth"] = True
             nxt = request.args.get("next", "")
-            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("dashboard.leads"))
+            resp = redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("dashboard.leads"))
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
         flash("Wrong password.")
-    return render_template("login.html")
+    resp = make_response(render_template("login.html"))
+    resp.headers["Cache-Control"] = "no-store"  # a cached page would carry a stale CSRF token
+    return resp
 
 
 @bp.post("/logout")

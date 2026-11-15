@@ -16,6 +16,11 @@ CONFIRMATION = "Understood. We won't message you again. If you ever want to talk
 OWNER = "2340000000"
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 @pytest.fixture(autouse=True)
 def fixed_followup_line(monkeypatch):
     monkeypatch.setattr(ai, "draft_followup_line", lambda lead, msgs, stage, prev: f"line{stage}")
@@ -475,7 +480,7 @@ def test_the_pause_button_pauses_the_lead_and_is_csrf_protected(app, sent, cl):
     lead = start_lead(Chat(app, sent, cl, "2348011111111"), cl)
     make_due(lead)
     c = dashboard(app)
-    assert c.post(f"/leads/{lead.id}/action", data={"action": "pause", "next": "followups"}).status_code == 400  # no token
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/action", data={"action": "pause", "next": "followups"}))  # no token
     resp = c.post(f"/leads/{lead.id}/action", data={"csrf": "t", "action": "pause", "next": "followups"})
     assert resp.status_code == 302 and resp.headers["Location"].endswith("/followups")
     db.session.expire_all()

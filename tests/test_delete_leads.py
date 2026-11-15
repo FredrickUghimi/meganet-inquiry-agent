@@ -19,6 +19,11 @@ spec.loader.exec_module(ml)
 SECRET = "SECRETBODY-do-not-print"
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def make_lead(phone, name, messages=2, demos=1, questions=1):
     lead = Lead(phone=phone, name=name)
     db.session.add(lead)
@@ -186,9 +191,9 @@ def test_delete_requires_the_checkbox(app, three):
 
 
 def test_delete_rejects_missing_csrf_and_login(app, three):
-    assert client(app).post("/leads/delete", data={"ids": [three[0]], "understand": "1"}).status_code == 400
-    assert client(app).post("/leads/delete", data={"csrf": "wrong", "ids": [three[0]], "understand": "1"}).status_code == 400
-    assert client(app).post("/leads/delete/confirm", data={"ids": [three[0]]}).status_code == 400
+    assert _csrf_rejected(client(app).post("/leads/delete", data={"ids": [three[0]], "understand": "1"}))
+    assert _csrf_rejected(client(app).post("/leads/delete", data={"csrf": "wrong", "ids": [three[0]], "understand": "1"}))
+    assert _csrf_rejected(client(app).post("/leads/delete/confirm", data={"ids": [three[0]]}))
     anon = client(app, logged_in=False)
     for r in (anon.get(f"/leads/{three[0]}/delete"),):
         assert r.status_code == 302 and "/login" in r.headers["Location"]

@@ -9,6 +9,11 @@ from test_webhook_inbound import LEAD, OWNER, post, text_value
 OTHER = "2348099999999"
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def make_lead(app, sent, claude, mid="wamid.first", body="Hi EHR"):
     claude["intent"] = "exploring"
     post(app, text_value(LEAD, mid=mid, body=body))
@@ -97,8 +102,8 @@ def test_dashboard_reply_failure_shows_meta_error_and_changes_nothing(app, sent,
 def test_dashboard_reply_requires_csrf_and_limits_length(app, sent, claude):
     lead = make_lead(app, sent, claude)
     c = client(app)
-    assert c.post(f"/leads/{lead.id}/reply", data={"text": "hi"}).status_code == 400
-    assert c.post(f"/leads/{lead.id}/reply", data={"csrf": "bad", "text": "hi"}).status_code == 400
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/reply", data={"text": "hi"}))
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/reply", data={"csrf": "bad", "text": "hi"}))
     r = c.post(f"/leads/{lead.id}/reply", data={"csrf": "t", "text": "x" * 1001}, follow_redirects=True)
     assert b"too long" in r.data and sent == []
     assert app.test_client().post(f"/leads/{lead.id}/reply", data={}).status_code in (302, 400)

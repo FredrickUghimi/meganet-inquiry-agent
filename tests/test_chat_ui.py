@@ -17,6 +17,11 @@ class FakeResp:
         return self._body
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def capture_graph(monkeypatch, reject_context=False):
     calls = []
     monkeypatch.setattr(whatsapp, "send_text", REAL_SEND_TEXT)  # exercise the real request building
@@ -151,7 +156,7 @@ def test_csrf_limit_and_window_still_enforced(app, sent, claude, monkeypatch):
     lead = ready_lead_with_messages(app, sent, claude)
     calls = capture_graph(monkeypatch)
     c = client(app)
-    assert c.post(f"/leads/{lead.id}/reply", data={"text": "x"}).status_code == 400
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/reply", data={"text": "x"}))
     assert b"too long" in c.post(f"/leads/{lead.id}/reply", data={"csrf": "t", "text": "x" * 1001},
                                  follow_redirects=True).data
     for m in Message.query.filter_by(direction="inbound"):

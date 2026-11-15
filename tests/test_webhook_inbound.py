@@ -11,6 +11,11 @@ OWNER = "2340000000"
 LEAD = "2348011111111"
 
 
+
+def _csrf_rejected(resp):
+    """CSRF failures redirect to the login page (never a raw 400) and do nothing."""
+    return resp.status_code == 302 and resp.headers["Location"].endswith("/login")
+
 def post(app, value, secret=b"shh"):
     payload = {"object": "whatsapp_business_account",
                "entry": [{"id": "WABA1", "changes": [{"field": "messages", "value": value}]}]}
@@ -204,7 +209,7 @@ def test_retry_button_replies_flashes_and_requires_csrf(app, sent, claude):
     c = app.test_client()
     with c.session_transaction() as sess:
         sess["auth"], sess["csrf"] = True, "tok"
-    assert c.post(f"/leads/{lead.id}/retry", data={}).status_code == 400
+    assert _csrf_rejected(c.post(f"/leads/{lead.id}/retry", data={}))
     r = c.post(f"/leads/{lead.id}/retry", data={"csrf": "tok"}, follow_redirects=True)
     assert b"Retry reply: replied" in r.data
     assert sent == [("text", LEAD, "reply:continue")]
