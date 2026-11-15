@@ -4,9 +4,9 @@
 <div class="card" style="max-width:640px">
   <h2 style="margin-top:0;color:#b91c1c">Delete {{ rows|length }} lead{{ 's' if rows|length != 1 }}?</h2>
   {% if error %}<div class="banner" role="alert">{{ error }}</div>{% endif %}
-  <table>
+  <table class="stack">
     <tr><th>ID</th><th>Name</th><th>Phone</th><th>Messages</th><th>Demos</th><th>Open questions</th></tr>
-    {% for r in rows %}<tr><td>{{ r.id }}</td><td>{{ r.name }}</td><td>{{ r.phone }}</td><td>{{ r.messages }}</td><td>{{ r.demos }}</td><td>{{ r.questions }}</td></tr>{% endfor %}
+    {% for r in rows %}<tr><td data-label="ID">{{ r.id }}</td><td data-label="Name">{{ r.name }}</td><td data-label="Phone" class="phone">{{ r.phone }}</td><td data-label="Messages">{{ r.messages }}</td><td data-label="Demos">{{ r.demos }}</td><td data-label="Open questions">{{ r.questions }}</td></tr>{% endfor %}
   </table>
   <p>This permanently removes {{ rows|length }} lead{{ 's' if rows|length != 1 }}, {{ totals.messages }} message(s), {{ totals.demos }} demo request(s) and {{ totals.questions }} open question(s). If they message again, they start as a brand-new lead.</p>
   <form method="post" action="{{ url_for('dashboard.delete_leads') }}">

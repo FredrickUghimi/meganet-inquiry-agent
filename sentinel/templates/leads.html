@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block body %}
-<div class="filters" style="margin-bottom:12px">
-  <a href="{{ url_for('dashboard.leads', status='needs_reply') }}" style="color:#b91c1c">{% if current == 'needs_reply' %}<b>Needs reply</b>{% else %}Needs reply{% endif %}</a>
-  <a href="{{ url_for('dashboard.leads') }}">{% if not current and not partners %}<b>All</b>{% else %}All{% endif %}</a>
-  <a href="{{ url_for('dashboard.leads', partner=1) }}">{% if partners %}<b>Partner enquiries</b>{% else %}Partner enquiries{% endif %}</a>
-  {% for s in statuses %}<a href="{{ url_for('dashboard.leads', status=s) }}">{% if current == s %}<b>{{ s.replace('_',' ') }}</b>{% else %}{{ s.replace('_',' ') }}{% endif %}</a>{% endfor %}
+<div class="filters" style="margin-bottom:12px" role="navigation" aria-label="Lead filters">
+  <a class="chip urgent{% if current == 'needs_reply' %} active{% endif %}" href="{{ url_for('dashboard.leads', status='needs_reply') }}"><span class="lbl">Needs reply</span> <span class="n">{{ counts.needs_reply }}</span></a>
+  <a class="chip{% if not current and not partners %} active{% endif %}" href="{{ url_for('dashboard.leads') }}"><span class="lbl">All</span> <span class="n">{{ counts.all }}</span></a>
+  <a class="chip{% if partners %} active{% endif %}" href="{{ url_for('dashboard.leads', partner=1) }}"><span class="lbl">Partner enquiries</span> <span class="n">{{ counts.partner }}</span></a>
+  {% for s in statuses %}<a class="chip{% if current == s %} active{% endif %}" href="{{ url_for('dashboard.leads', status=s) }}"><span class="lbl">{{ s.replace('_',' ') }}</span> <span class="n">{{ counts[s] }}</span></a>{% endfor %}
 </div>
 <div style="margin-bottom:12px">
   {% if select %}<a href="{{ url_for('dashboard.leads', status=current) }}">Cancel select</a>
@@ -12,24 +12,24 @@
 </div>
 {% if select %}<form method="post" action="{{ url_for('dashboard.delete_selected_confirm') }}">
   <input type="hidden" name="csrf" value="{{ csrf_token() }}">{% endif %}
-<div class="card table-scroll">
+<div class="card table-scroll leads-wrap">
 {% if leads %}
-<table>
-  <tr>{% if select %}<th></th>{% endif %}<th>Name</th><th>Contact</th><th>Product</th><th>Status</th><th>Last contact</th><th>Next follow-up</th></tr>
+<table class="leads">
+  <tr class="head">{% if select %}<th></th>{% endif %}<th>Name</th><th>Contact</th><th>Product</th><th>Status</th><th>Last contact</th><th>Next follow-up</th></tr>
   {% for l in leads %}
-  <tr>
-    {% if select %}<td><input type="checkbox" name="ids" value="{{ l.id }}" aria-label="Select {{ l.display_name }}" style="width:auto"></td>{% endif %}
-    <td><a href="{{ url_for('dashboard.lead_detail', lead_id=l.id) }}">{{ l.display_name }}</a>
-      {% set w = wait_label(l) %}{% if w %}<div><span class="badge" style="background:#fee2e2;color:#b91c1c">Needs your reply · {{ w }}</span></div>{% endif %}
-      {% if l.opted_out %}<div><span class="badge" style="background:#1f2937;color:#fff">Opted out</span></div>{% endif %}
-      {% if l.partner_enquiry %}<div><span class="badge" style="background:#ede9fe;color:#5b21b6">Partner enquiry</span></div>{% endif %}
+  <tr class="lead-row">
+    {% if select %}<td class="c-sel"><input type="checkbox" name="ids" value="{{ l.id }}" aria-label="Select {{ l.display_name }}" style="width:auto"></td>{% endif %}
+    <td class="c-name"><a class="open" href="{{ url_for('dashboard.lead_detail', lead_id=l.id) }}">{{ l.display_name }}</a>
+      {% set w = wait_label(l) %}{% if w %}<div><span class="badge b-wait">Needs your reply · {{ w }}</span></div>{% endif %}
+      {% if l.opted_out %}<div><span class="badge b-opt">Opted out</span></div>{% endif %}
+      {% if l.partner_enquiry %}<div><span class="badge b-partner">Partner enquiry</span></div>{% endif %}
       {% if l.referrer_name or l.referrer_phone %}<div class="mute">Referred by {{ l.referrer_name or '' }}{% if l.referrer_phone %} ({{ l.referrer_phone }}){% endif %}</div>{% endif %}
-      {% if l.summary %}<div class="mute">{{ l.summary }}</div>{% endif %}</td>
-    <td>{{ l.phone or '' }}{% if l.phone and l.email %}<br>{% endif %}{{ l.email or '' }}</td>
-    <td>{{ PRODUCT_NAMES[l.product_interest] }}</td>
-    <td><span class="badge s-{{ l.status }}">{{ l.status.replace('_',' ') }}</span>{% if l.followup_paused %} <span class="badge">paused</span>{% endif %}</td>
-    <td>{{ l.last_contact_at|local }}</td>
-    <td>{% if l.next_followup_at %}{{ l.next_followup_at|local }} <span class="mute">(day {{ [1,3,7]|select('gt', l.followup_stage)|first }})</span>{% else %}—{% endif %}</td>
+      {% if l.summary %}<div class="mute summary">{{ l.summary }}</div>{% endif %}</td>
+    <td class="c-contact"><span class="phone">{{ l.phone or '' }}</span>{% if l.phone and l.email %}<br class="email">{% endif %}<span class="email">{{ l.email or '' }}</span></td>
+    <td class="c-product">{{ PRODUCT_NAMES[l.product_interest] }}</td>
+    <td class="c-status"><span class="badge s-{{ l.status }}">{{ l.status.replace('_',' ') }}</span>{% if l.followup_paused %} <span class="badge">paused</span>{% endif %}</td>
+    <td class="c-last" data-label="Last activity">{{ l.last_contact_at|local }}</td>
+    <td class="c-next">{% if l.next_followup_at %}{{ l.next_followup_at|local }} <span class="mute">(day {{ [1,3,7]|select('gt', l.followup_stage)|first }})</span>{% else %}—{% endif %}</td>
   </tr>
   {% endfor %}
 </table>
@@ -38,4 +38,26 @@
 {% endif %}
 </div>
 {% if select %}<p><button class="primary" style="background:#b91c1c;border-color:#b91c1c">Delete selected</button></p></form>{% endif %}
+<style>
+  table.leads a.open { overflow-wrap:anywhere; }
+  @media (max-width:700px) {
+    .leads-wrap { background:none; border:0; padding:0; overflow:visible; }
+    table.leads, table.leads tbody { display:block; }
+    table.leads tr.head { display:none; }
+    table.leads tr.lead-row { position:relative; display:grid; grid-template-columns:1fr auto; gap:2px 10px; margin-bottom:10px;
+      padding:14px; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+    table.leads td { display:block; border:0; padding:0; min-width:0; }
+    table.leads td.c-sel { grid-column:1 / -1; position:relative; z-index:2; padding-bottom:6px; }
+    table.leads td.c-sel input { width:26px; height:26px; }
+    table.leads td.c-name { grid-column:1; grid-row:2; }
+    table.leads td.c-status { grid-column:2; grid-row:2; text-align:right; }
+    table.leads td.c-product { grid-column:1 / -1; grid-row:3; color:var(--mute); font-size:13px; }
+    table.leads td.c-contact { grid-column:1 / -1; grid-row:4; font-size:13px; color:var(--mute); }
+    table.leads td.c-last { grid-column:1 / -1; grid-row:5; font-size:13px; color:var(--mute); }
+    table.leads td.c-last::before { content:"Last activity "; }
+    table.leads td.c-next, table.leads .email, table.leads .summary { display:none; }
+    table.leads td.c-name a.open { font-weight:600; font-size:16px; text-decoration:none; }
+    table.leads td.c-name a.open::after { content:""; position:absolute; inset:0; border-radius:10px; }
+  }
+</style>
 {% endblock %}
