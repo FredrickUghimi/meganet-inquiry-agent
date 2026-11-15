@@ -158,6 +158,21 @@ def delete_leads():
     return redirect(url_for("dashboard.leads"))
 
 
+def chip_counts():
+    """Numbers on the lead filter chips (display only). Status/partner/all come from grouped COUNT queries.
+    'Needs reply' cannot be a plain COUNT: whether a lead is waiting depends on per-lead rules (owner takeover window,
+    config, message order) in service._waiting_inbound, so it still uses that function, but only on open leads
+    (closed leads never wait), rather than loading every lead."""
+    by_status = dict(db.session.query(Lead.status, db.func.count(Lead.id)).group_by(Lead.status).all())
+    partner = db.session.query(db.func.count(Lead.id)).filter(Lead.partner_enquiry.is_(True)).scalar()
+    open_leads = Lead.query.filter(Lead.status.notin_(service.CLOSED)).all()
+    counts = {"all": sum(by_status.values()), "partner": partner,
+              "needs_reply": sum(1 for l in open_leads if service.reply_wait_since(l) is not None)}
+    for s_ in STATUS_ORDER:
+        counts[s_] = by_status.get(s_, 0)
+    return counts
+
+
 @bp.get("/leads")
 @login_required
 def leads():
@@ -173,12 +188,7 @@ def leads():
         rows = [l for l in rows if service.reply_wait_since(l) is not None]
     rows.sort(key=lambda l: l.status != "ready")  # stable: ready leads float to the top
     rows.sort(key=lambda l: service.reply_wait_since(l) is None)  # then leads waiting for Fredrick above all
-    # Chip counts (display only): one pass over every lead.
-    everyone = Lead.query.all()
-    counts = {"all": len(everyone), "partner": sum(1 for l in everyone if l.partner_enquiry),
-              "needs_reply": sum(1 for l in everyone if service.reply_wait_since(l) is not None)}
-    for s_ in STATUS_ORDER:
-        counts[s_] = sum(1 for l in everyone if l.status == s_)
+    counts = chip_counts()
     return render_template("leads.html", leads=rows, statuses=STATUS_ORDER, current=status, partners=partners,
                            select=request.args.get("select") == "1", counts=counts)
 
