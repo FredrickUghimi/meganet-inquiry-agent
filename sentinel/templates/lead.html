@@ -39,7 +39,7 @@
 <div class="card" id="details">
   <h3 style="margin-top:0">Lead details</h3>
   <p class="mute">
-    <span class="phone">{{ lead.phone or 'no phone' }}</span> · <span class="phone">{{ lead.email or 'no email' }}</span> · {{ PRODUCT_NAMES[lead.product_interest] }} ·
+    <span class="phone">{% if lead.phone %}<a href="https://wa.me/{{ lead.phone|replace('+', '')|replace(' ', '')|replace('-', '') }}" target="_blank" rel="noopener noreferrer" title="Open WhatsApp chat">{{ lead.phone }}</a>{% else %}no phone{% endif %}</span> · <span class="phone">{{ lead.email or 'no email' }}</span> · {{ PRODUCT_NAMES[lead.product_interest] }} ·
     via {{ lead.source }} · created {{ lead.created_at|local }}<br>
     Last contact {{ lead.last_contact_at|local }} · Next follow-up {{ lead.next_followup_at|local }} ·
     Stage sent: {{ lead.followup_stage or 'none' }}{% if lead.intent %} · Intent: {{ lead.intent.replace('_',' ') }}{% endif %}

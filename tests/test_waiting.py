@@ -294,3 +294,17 @@ def test_a_handed_back_lead_gets_the_bot_again(app, sent, claude):
     db.session.commit()
     say(app, "wamid.a", "Hello, anyone there?")
     assert [s for s in sent if s[1] == LEAD]  # the bot answers again after a hand-back
+
+
+def test_phone_numbers_are_tap_to_chat_links_on_the_lead_page_and_list(app, sent, claude):
+    claude["intent"] = "exploring"
+    lead = make_waiting(app, sent, claude)
+    lead.phone = "+234 801-111 1111"
+    db.session.commit()
+    c = app.test_client()
+    c.post("/login", data={"password": "pw", "csrf": ""})
+    with c.session_transaction() as s:
+        s["auth"], s["csrf"] = True, "tok"
+    for url in (f"/leads/{lead.id}", "/"):
+        html = c.get(url).get_data(as_text=True)
+        assert 'href="https://wa.me/2348011111111"' in html and "+234 801-111 1111" in html, url

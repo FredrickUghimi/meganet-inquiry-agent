@@ -25,7 +25,7 @@
       {% if l.partner_enquiry %}<div><span class="badge b-partner">Partner enquiry</span></div>{% endif %}
       {% if l.referrer_name or l.referrer_phone %}<div class="mute">Referred by {{ l.referrer_name or '' }}{% if l.referrer_phone %} ({{ l.referrer_phone }}){% endif %}</div>{% endif %}
       {% if l.summary %}<div class="mute summary">{{ l.summary }}</div>{% endif %}</td>
-    <td class="c-contact"><span class="phone">{{ l.phone or '' }}</span>{% if l.phone and l.email %}<br class="email">{% endif %}<span class="email">{{ l.email or '' }}</span></td>
+    <td class="c-contact"><span class="phone">{% if l.phone %}<a href="https://wa.me/{{ l.phone|replace('+', '')|replace(' ', '')|replace('-', '') }}" target="_blank" rel="noopener noreferrer" title="Open WhatsApp chat">{{ l.phone }}</a>{% endif %}</span>{% if l.phone and l.email %}<br class="email">{% endif %}<span class="email">{{ l.email or '' }}</span></td>
     <td class="c-product">{{ PRODUCT_NAMES[l.product_interest] }}</td>
     <td class="c-status"><span class="badge s-{{ l.status }}">{{ l.status.replace('_',' ') }}</span>{% if l.followup_paused %} <span class="badge">paused</span>{% endif %}</td>
     <td class="c-last" data-label="Last activity">{{ l.last_contact_at|local }}</td>
