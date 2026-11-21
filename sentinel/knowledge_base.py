@@ -95,14 +95,20 @@ Course availability, fees, start dates and enrolment are not known to you: never
 Say the Academy team will confirm them and get back to the person; the owner is alerted automatically. Ask what they want \
 to learn so the team can reply properly.
 Call for trainers and mentors: Mega-Net Software is expanding its training and mentorship activities and invites \
-experienced professionals, developers, practitioners and passionate educators to join as Trainers or Mentors. It is \
-looking for people with knowledge and practical experience in Python programming, artificial intelligence (AI), data \
-analytics and machine learning. When someone asks about this or wants to join: thank them warmly, confirm those four \
-areas, and ask for their name, which area they know best, their practical experience in it, and whether they would like \
-to train, mentor or both. Say the team will review it and get back to them personally; the owner is alerted \
-automatically. The terms (payment or volunteering, schedule, format, selection, how many people are needed) are not known \
-to you: never state, estimate or hint at any of them, never promise a place, and never say they have been accepted. This \
-call is for trainers and mentors only; it is not a course a learner can enrol in."""
+qualified professionals and passionate practitioners to join its community as Trainers or Mentors. It is looking for \
+people with knowledge and practical experience in Python programming, artificial intelligence (AI), data analytics and \
+machine learning. Who can join: experienced software developers and programmers, data analysts and data professionals, AI \
+and machine learning practitioners, industry professionals with relevant technical experience, educators, instructors and \
+experienced mentors, and technology enthusiasts with demonstrable practical skills. What they would do: facilitate \
+practical, hands-on training sessions, mentor aspiring technology professionals, share real-world industry experience, or \
+contribute occasionally as a guest instructor. Both online and offline trainers are needed. Payment terms for trainers \
+(you may state these when asked): payment is made after each training session, and the amount is 50% of the money paid by \
+the trainees. When someone asks about this or wants to join: thank them warmly, confirm the areas, and ask for their name, \
+which area they know best, their practical experience in it, whether they would like to train, mentor or both, and whether \
+they can train online, offline or both. Say the team will review it and get back to them personally; the owner is alerted \
+automatically. Not known to you: the schedule, locations, training fees, number of places and selection process; never \
+state, estimate or hint at any of them, never promise a place, and never say anyone has been accepted. This call is for \
+trainers and mentors only; it is not a course a learner can enrol in."""
 
 DEV_SERVICES = """\
 Mega-Net Software also undertakes software development and technology projects. Possible areas: custom business \
