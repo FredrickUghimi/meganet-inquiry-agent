@@ -88,7 +88,8 @@ def test_dashboard_reply_switches_to_human_handled(app, sent, claude):
     assert service.human_handled(Lead.query.one())
     sent.clear()
     say(app, "ok thanks", "wamid.b")
-    assert HOLD in to_lead(sent)[0]
+    assert to_lead(sent) == []  # a person already replied: the bot stays silent
+    assert any("replied to you" in m for m in to_owner(sent))  # but the owner is still alerted
 
 
 def test_resume_hands_back_to_bot(app, sent, claude):
