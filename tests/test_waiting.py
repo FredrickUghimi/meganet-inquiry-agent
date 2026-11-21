@@ -269,3 +269,28 @@ def test_email_failure_never_logs_password(app, sent, claude, monkeypatch, caplo
     app.config.update(EMAIL)
     assert emailer.send_alert("s", "b") is False
     assert "pa55-secret" not in caplog.text and "RuntimeError" in caplog.text
+
+
+@pytest.mark.parametrize("sender", ["owner", "staff"])
+def test_bot_stays_silent_once_a_person_has_replied_but_the_owner_is_still_alerted(app, sent, claude, sender):
+    claude["intent"] = "exploring"
+    lead = make_waiting(app, sent, claude, "paused")
+    db.session.add(Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body="Hello, Fredrick here.",
+                           sent_at=utcnow(), status="sent", handled=True, sender=sender))
+    db.session.commit()
+    say(app, "wamid.a", "Thanks, I want Python and data analytics.")
+    assert holding(sent) == [] and [s for s in sent if s[1] == LEAD] == []  # nothing goes to the customer
+    mine = alerts(sent)
+    assert len(mine) == 1 and "replied to you" in mine[0][2] and "Python and data analytics" in mine[0][2]
+
+
+def test_a_handed_back_lead_gets_the_bot_again(app, sent, claude):
+    claude["intent"] = "exploring"
+    lead = make_waiting(app, sent, claude, "paused")
+    db.session.add(Message(lead_id=lead.id, direction="outbound", channel="whatsapp", body="Hello.",
+                           sent_at=utcnow() - timedelta(minutes=5), status="sent", handled=True, sender="owner"))
+    lead.handback_at = utcnow()
+    lead.followup_paused = False
+    db.session.commit()
+    say(app, "wamid.a", "Hello, anyone there?")
+    assert [s for s in sent if s[1] == LEAD]  # the bot answers again after a hand-back

@@ -457,7 +457,13 @@ def human_handled(lead):
         return True
     if lead.status == "ready" and not cfg["BOT_ANSWERS_AFTER_READY"]:
         return True
-    since = utcnow() - timedelta(hours=cfg["OWNER_TAKEOVER_HOURS"])
+    return person_replied_recently(lead)
+
+
+def person_replied_recently(lead):
+    """True when Fredrick or staff sent this lead a message within OWNER_TAKEOVER_HOURS (and after any hand-back): a person
+    is already in the conversation, so the bot must not speak for him."""
+    since = utcnow() - timedelta(hours=current_app.config["OWNER_TAKEOVER_HOURS"])
     if lead.handback_at:
         since = max(since, lead.handback_at)
     return Message.query.filter(
@@ -538,6 +544,7 @@ def _claude_text(lead, situation, fixed_text, context=""):
 def _waiting_reply(lead, newly_ready, dry_run, say):
     """A waiting prospect wrote again: holding reply (cooldown) + owner alert (throttle). Returns (outcome, reason)."""
     cfg, now, notes = current_app.config, utcnow(), []
+    person_on = person_replied_recently(lead)  # Fredrick or staff already replied: stay out of the way
     if newly_ready:
         notes.append("owner already alerted that the lead is ready")
     elif lead.last_owner_alert_at and now - lead.last_owner_alert_at < OWNER_ALERT_THROTTLE:
@@ -546,12 +553,15 @@ def _waiting_reply(lead, newly_ready, dry_run, say):
         notes.append("dry run: would alert the owner")
     else:
         sent_alert = send_owner_alert(
-            lead, f'{lead.display_name} wrote while waiting for you: "{_quote(lead)}"')
+            lead, f'{lead.display_name} replied to you: "{_quote(lead)}"' if person_on
+            else f'{lead.display_name} wrote while waiting for you: "{_quote(lead)}"')
         notes.append("owner alerted" if sent_alert else "owner alert FAILED (see logs)")
     say(f"waiting lead (status={lead.status}, paused={lead.followup_paused}): " + "; ".join(notes))
 
     cooldown = timedelta(hours=cfg["HOLD_REPLY_COOLDOWN_HOURS"])
     why = f"lead is {'ready' if lead.status == 'ready' else 'paused/contacted'}; " + "; ".join(notes)
+    if person_on:
+        return "skipped", why + "; a person already replied to this lead: no holding reply, the bot stays silent"
     if not lead.phone:
         return "skipped", why + "; no phone for a holding reply"
     if not whatsapp.is_configured():
