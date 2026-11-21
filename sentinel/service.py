@@ -376,7 +376,10 @@ def send_whatsapp(lead, *, text=None, template=None, params=(), is_followup=Fals
 
 
 def _alert_whatsapp(lead, line, url):
-    """WhatsApp alert to Fredrick: plain text if his window is open, else the escalation template."""
+    """WhatsApp alert to Fredrick. The escalation template goes first (OWNER_ALERT_TEMPLATE_FIRST, on by default): a template
+    is delivered whether or not his 24h window is open, whereas Meta can accept a free-form text with HTTP 200 and then drop
+    it with a late "failed" status when the window is closed, which would look like success here. Plain text is the fallback
+    when no template is configured or the template send is refused."""
     cfg = current_app.config
     owner = cfg["OWNER_WHATSAPP_NUMBER"]
     if not whatsapp.is_configured():
@@ -385,21 +388,30 @@ def _alert_whatsapp(lead, line, url):
     if not owner:
         log.warning("OWNER_WHATSAPP_NUMBER not set; cannot alert about lead %s", lead.id)
         return False
+    tmpl = cfg["WHATSAPP_TEMPLATE_ESCALATION"]
+    tried_template = False
+    if tmpl and cfg.get("OWNER_ALERT_TEMPLATE_FIRST"):
+        tried_template = True
+        try:
+            whatsapp.send_template(owner, tmpl, cfg["WHATSAPP_TEMPLATE_LANG"], [line, url])
+            return True
+        except Exception as exc:
+            log.warning("Owner alert template failed for lead %s (%s); trying plain text", lead.id, exc)
     try:
         whatsapp.send_text(owner, f"{line}\n{url}")
         return True
     except Exception as exc:
-        log.warning("Free-form owner alert failed (%s); trying template", exc)
-    tmpl = cfg["WHATSAPP_TEMPLATE_ESCALATION"]
-    if tmpl:
+        log.warning("Free-form owner alert failed (%s)", exc)
+    if tmpl and not tried_template:
         try:
             whatsapp.send_template(owner, tmpl, cfg["WHATSAPP_TEMPLATE_LANG"], [line, url])
             return True
         except Exception:
             log.exception("Owner alert template failed for lead %s", lead.id)
-    else:
+    elif not tmpl:
         log.error("Owner alert for lead %s not delivered. Message the business number from your phone to "
                   "reopen the 24h window, or set WHATSAPP_TEMPLATE_ESCALATION.", lead.id)
+    log.error("Owner alert for lead %s was NOT delivered by WhatsApp", lead.id)
     return False
 
 

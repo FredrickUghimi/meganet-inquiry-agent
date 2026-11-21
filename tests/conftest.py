@@ -77,6 +77,7 @@ def app(tmp_path):
         "DASHBOARD_PASSWORD": "pw", "WHATSAPP_VERIFY_TOKEN": "verify", "WHATSAPP_APP_SECRET": "shh",
         "WHATSAPP_TOKEN": "tok", "WHATSAPP_PHONE_NUMBER_ID": "123",
         "OWNER_WHATSAPP_NUMBER": "2340000000", "PUBLIC_BASE_URL": "https://sentinel.test",
+        "OWNER_ALERT_TEMPLATE_FIRST": False,  # the older tests read the plain-text alert; the new ones switch this on
     })
     with app.app_context():
         yield app

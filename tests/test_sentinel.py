@@ -346,3 +346,30 @@ def test_database_url_postgres_prefix(monkeypatch):
     assert database_uri() == "postgresql+psycopg2://u:p@h:5432/d"
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h/d")
     assert database_uri() == "postgresql+psycopg2://u:p@h/d"
+
+
+def test_owner_alert_uses_the_template_first_so_a_closed_window_cannot_swallow_it(app, sent, claude):
+    app.config["OWNER_ALERT_TEMPLATE_FIRST"] = True
+    inbound(app)
+    sent.clear()
+    claude.update(intent="ready_demo", summary="Clinic, 12 staff, wants a demo.")
+    inbound(app, text="Can we book a demo?", mid="wamid.in2")
+    to_owner = [s for s in sent if s[1] == "2340000000"]
+    assert [s[0] for s in to_owner] == ["template"] and to_owner[0][2] == "meganet_lead_alert"
+    line, url = to_owner[0][3]
+    assert "ready for a demo" in line and url == "https://sentinel.test/leads/1"
+
+
+def test_owner_alert_falls_back_to_plain_text_when_the_template_is_refused(app, sent, claude, monkeypatch):
+    from sentinel import whatsapp
+    app.config["OWNER_ALERT_TEMPLATE_FIRST"] = True
+
+    def refused(to, name, lang, params):
+        raise whatsapp.WhatsAppError("132001 template does not exist")
+    monkeypatch.setattr(whatsapp, "send_template", refused)
+    inbound(app)
+    sent.clear()
+    claude.update(intent="ready_demo")
+    inbound(app, text="Can we book a demo?", mid="wamid.in2")
+    to_owner = [s for s in sent if s[1] == "2340000000"]
+    assert [s[0] for s in to_owner] == ["text"] and "https://sentinel.test/leads/1" in to_owner[0][2]

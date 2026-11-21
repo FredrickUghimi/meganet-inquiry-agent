@@ -96,6 +96,7 @@ def load_config():
         # Who handles a lead: the bot keeps answering ready leads unless a human has taken over
         "OWNER_TAKEOVER_HOURS": float(_env("OWNER_TAKEOVER_HOURS", "48")),
         "BOT_ANSWERS_AFTER_READY": _flag("BOT_ANSWERS_AFTER_READY", True),
+        "OWNER_ALERT_TEMPLATE_FIRST": _flag("OWNER_ALERT_TEMPLATE_FIRST", True),
         # Existing clients get the support route, not sales flows. Digits only, comma separated.
         "EXISTING_CLIENT_NUMBERS": _numbers("EXISTING_CLIENT_NUMBERS"),
         # Team members who are alerted about demo requests and may send confirm / decline (digits, comma separated)
