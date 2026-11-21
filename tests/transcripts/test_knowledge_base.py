@@ -156,7 +156,8 @@ def test_trainer_and_mentor_call_is_known_and_applicants_alert_the_owner_without
     only(system, ACADEMY_MARK)
     assert "Call for trainers and mentors" in system and "machine learning" in system
     assert "never state, estimate or hint at any of them, never promise a place" in system
-    assert "50% of the money paid by the trainees" in system and "payment is made after each training session" in system
+    assert "discussed privately by the team" in system and "never state, estimate or hint at any amount" in system
+    assert "50%" not in system and "after each training session" not in system  # pay is never stated by the bot
     assert "Both online and offline trainers are needed" in system and "guest instructor" in system
     q = OpenQuestion.query.one()
     assert q.kind == "unanswered" and q.question.startswith("[Academy trainer/mentor]")
