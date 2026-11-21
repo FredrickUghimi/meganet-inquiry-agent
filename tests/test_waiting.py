@@ -305,6 +305,6 @@ def test_phone_numbers_are_tap_to_chat_links_on_the_lead_page_and_list(app, sent
     c.post("/login", data={"password": "pw", "csrf": ""})
     with c.session_transaction() as s:
         s["auth"], s["csrf"] = True, "tok"
-    for url in (f"/leads/{lead.id}", "/"):
+    for url in (f"/leads/{lead.id}", "/leads"):
         html = c.get(url).get_data(as_text=True)
         assert 'href="https://wa.me/2348011111111"' in html and "+234 801-111 1111" in html, url
