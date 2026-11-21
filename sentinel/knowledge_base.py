@@ -93,7 +93,16 @@ learning, large language models, prompt engineering and practical technology ski
 and learning initiatives.
 Course availability, fees, start dates and enrolment are not known to you: never state, estimate or hint at any of them. \
 Say the Academy team will confirm them and get back to the person; the owner is alerted automatically. Ask what they want \
-to learn so the team can reply properly."""
+to learn so the team can reply properly.
+Call for trainers and mentors: Mega-Net Software is expanding its training and mentorship activities and invites \
+experienced professionals, developers, practitioners and passionate educators to join as Trainers or Mentors. It is \
+looking for people with knowledge and practical experience in Python programming, artificial intelligence (AI), data \
+analytics and machine learning. When someone asks about this or wants to join: thank them warmly, confirm those four \
+areas, and ask for their name, which area they know best, their practical experience in it, and whether they would like \
+to train, mentor or both. Say the team will review it and get back to them personally; the owner is alerted \
+automatically. The terms (payment or volunteering, schedule, format, selection, how many people are needed) are not known \
+to you: never state, estimate or hint at any of them, never promise a place, and never say they have been accepted. This \
+call is for trainers and mentors only; it is not a course a learner can enrol in."""
 
 DEV_SERVICES = """\
 Mega-Net Software also undertakes software development and technology projects. Possible areas: custom business \

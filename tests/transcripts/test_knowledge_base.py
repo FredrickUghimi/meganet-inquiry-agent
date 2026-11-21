@@ -148,6 +148,34 @@ def test_academy_fees_dates_and_enrolment_go_to_the_team_with_an_owner_alert(cha
     assert "team" in r[0]
 
 
+def test_trainer_and_mentor_call_is_known_and_applicants_alert_the_owner_without_promises(chat, cl):
+    cl.classification.update(product="unsure", topic="academy")
+    r = chat.say("I saw your call for trainers. I want to join as a Python trainer",
+                 turn("Thank you! Which area do you know best, and what practical experience do you have in it?"))
+    system = system_of(cl.calls[0])
+    only(system, ACADEMY_MARK)
+    assert "Call for trainers and mentors" in system and "machine learning" in system
+    assert "never state, estimate or hint at any of them, never promise a place" in system
+    q = OpenQuestion.query.one()
+    assert q.kind == "unanswered" and q.question.startswith("[Academy trainer/mentor]")
+    assert any("Academy" in t for t in chat.owner_texts())
+    assert "team" in r[0] or "experience" in r[0]
+
+
+def test_trainer_and_mentor_wording_routes_to_the_academy_and_flags_only_applicants():
+    for text in ("Are you looking for trainers?", "Can I be a mentor?", "I want to apply as a trainer",
+                 "I would like to mentor", "Interested in being a trainer in data analytics"):
+        hint = ai.topic_hint(text)
+        assert hint and hint[0] == "academy", text
+    for text in ("I want to join as a mentor", "I can teach for you", "Interested in being a trainer",
+                 "Can I volunteer as an instructor?", "I would like to mentor"):
+        assert ai.topic_flag("academy", text) == ("unanswered", "Academy trainer/mentor"), text
+    assert ai.topic_flag("academy", "Will I get a mentor in the course?") == (None, None)
+    assert ai.topic_flag("academy", "What does the Academy teach?") == (None, None)
+    assert ai.topic_flag("academy", "How much is the course?") == ("unanswered", "Academy")
+    assert ai.topic_hint("Do you provide staff training during implementation?") is None
+
+
 def test_a_general_academy_question_is_answered_without_an_alert(chat, cl):
     cl.classification.update(product="unsure", topic="academy")
     chat.say("What does the Academy teach?", turn("Software engineering, Python, data analytics and AI."))

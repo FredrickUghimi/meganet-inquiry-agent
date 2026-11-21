@@ -201,7 +201,7 @@ CLASSIFY_INSTRUCTIONS = (
     "topic: what the lead's latest message is about. ehr = Mega-Net EHR Cloud (including its Financial Sentinel); erp = "
     "Mega-Net ERP Cloud (including Business Sentinel and BizLens, its former name); other_product = any other Mega-Net "
     "application (HospitalPro, Revenue Guard, PharmacyPro, Clinic Appointment System, ChurchPro, SchoolPro, GuestsPro, "
-    "the desktop Mega-Net ERP, BuildBuddy) and then other_product is its name; academy = Mega-Net Academy training; "
+    "the desktop Mega-Net ERP, BuildBuddy) and then other_product is its name; academy = Mega-Net Academy training, mentorship, or someone asking about becoming a trainer or mentor; "
     "dev_services = having custom software built; partnership = a business partnership, reselling or collaboration; "
     "general = anything else (greetings, demo, pricing, thanks, what is Mega-Net Software). other_product is null "
     "unless topic is other_product. referrer_name / referrer_phone: only when the lead says someone referred or sent them "
@@ -287,7 +287,9 @@ def heuristic_intent(text):
 _TOPIC_HINTS = (  # keyword safety net for the classifier's topic, first match wins
     ("other_product", re.compile(r"\b(hospital ?pro|revenue ?guard|pharmacy ?pro|clinic appointment(?: system)?|church ?pro|"
                                  r"school ?pro|guests? ?pro|build ?buddy|desktop erp|legacy erp)\b", re.I)),
-    ("academy", re.compile(r"\b(academy|courses?|enrol(?:l|ment|ling)?|boot ?camp|mentorship|"
+    ("academy", re.compile(r"\b(academy|courses?|enrol(?:l|ment|ling)?|boot ?camp|mentorship|mentoring|"
+                           r"(?:trainers?|mentors?|instructors?|facilitators?)|"
+                           r"(?:training|mentorship) (?:programmes?|programs?|sessions?|classes)|"
                            r"learn (?:python|programming|coding|data|ai))\b", re.I)),
     ("dev_services", re.compile(r"\b(custom (?:software|app|application|system|development)|software development|"
                                 r"(?:build|develop|create) (?:me |us )?(?:an? |the )?(?:\w+ )?(?:app|software|system|application|website))\b",
@@ -298,6 +300,14 @@ _TOPIC_HINTS = (  # keyword safety net for the classifier's topic, first match w
 )
 ACADEMY_ADMIN_RE = re.compile(r"\b(fees?|prices?|cost|how much|dates?|start(?:s|ing)?|when|enrol\w*|regist\w+|apply|"
                               r"admission|schedule|cohort|availab\w+|next class|duration|intake)\b", re.I)
+
+
+TRAINER_APPLY_RE = re.compile(
+    r"\b(?:(?:be|become|join\w*|apply\w*|serve|volunteer\w*|work|register\w*|interested)(?: \w+){0,3} "
+    r"(?:as |in being )?(?:an? )?(?:trainers?|mentors?|instructors?|facilitators?)|"
+    r"(?:teach|train|mentor)(?: \w+){0,2} (?:for|with|at) (?:you|us|mega|the academy)|"
+    r"(?:i|we)(?: \w+)? (?:can|could|would like to|want to|wish to|am willing to) (?:teach|train|mentor)|"
+    r"(?:trainers?|mentors?) (?:and|or|&) (?:trainers?|mentors?)|call for (?:trainers?|mentors?))\b", re.I)
 
 
 def topic_hint(text):
@@ -333,7 +343,9 @@ PM_UNAVAILABLE_RE = re.compile(
 
 def topic_flag(topic, latest):
     """(flag, tag) when the topic must go to a person with an owner alert, else (None, None): Academy fees, dates and
-    enrolment; every custom-development request; partnership enquiries."""
+    enrolment; people offering to join as a trainer or mentor; every custom-development request; partnership enquiries."""
+    if topic == "academy" and TRAINER_APPLY_RE.search(latest or ""):
+        return "unanswered", "Academy trainer/mentor"
     if topic == "academy" and ACADEMY_ADMIN_RE.search(latest or ""):
         return "unanswered", "Academy"
     if topic == "dev_services":
@@ -520,7 +532,7 @@ REPLY_RULES = (
     "AI, answer honestly that you are an AI assistant and that a member of the team follows up personally. Introduce "
     "yourself as the AI assistant only once, in the first message of the conversation, and never again.\n"
     "- Custom software requests are never promised: say the team assesses them. For Academy fees, dates and enrolment say "
-    "the team will confirm. Give no e-mail address or website. When asked how to contact the company, for a number, to "
+    "the team will confirm; the same for anyone offering to be a trainer or mentor (never state pay, schedule or acceptance). Give no e-mail address or website. When asked how to contact the company, for a number, to "
     "message a person or for a partner contact, give the official WhatsApp number and link from the business facts, exactly, "
     "and no other number: never Fredrick's or the owner's.\n"
     "- If they ask to talk to a person, hand over warmly: say Fredrick or a member of the team will take over and reply "
