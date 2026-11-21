@@ -9,6 +9,10 @@
     {% if lead.partner_enquiry %}<span class="badge b-partner">Partner enquiry</span>{% endif %}
     {% if lead.opted_out %}<span class="badge b-opt">Opted out</span>{% elif lead.followups_off %}<span class="badge">No follow-ups (not interested)</span>{% endif %}
     {% set w = wait_label(lead) %}{% if w %}<span class="badge b-wait">Needs your reply · {{ w }}</span>{% endif %}</h2>
+  <div style="font-size:1.05rem;margin:2px 0 8px">
+    {% if lead.phone %}📞 <a href="https://wa.me/{{ lead.phone|replace('+', '')|replace(' ', '')|replace('-', '') }}" target="_blank" rel="noopener noreferrer" title="Open WhatsApp chat"><strong>+{{ lead.phone|replace('+', '') }}</strong></a>{% else %}<span class="mute">no phone number</span>{% endif %}
+    {% if lead.email %} · ✉ {{ lead.email }}{% endif %}
+  </div>
   {% if lead.opted_out %}<div class="flash" style="background:#e5e7eb;color:#111827">This lead asked us to stop{% if lead.opted_out_at %} on {{ lead.opted_out_at|local }}{% endif %}. No template or follow-up will be sent to this number again. A message from them is still answered; only a clear request to start again lifts it.</div>{% endif %}
   {% if lead.template_error %}<div class="flash" style="background:#fee2e2;color:#7f1d1d">⚠ WhatsApp template problem{% if lead.template_error_at %} ({{ lead.template_error_at|local }}){% endif %}: {{ lead.template_error }}. The same follow-up is tried once more, then follow-ups pause.</div>{% endif %}
   {% if lead.ai_note %}<div class="flash" style="background:#fee2e2;color:#7f1d1d">⚠ {{ lead.ai_note }}
@@ -18,7 +22,7 @@
 </div>
 <div class="card">
   <h3 style="margin-top:0">Conversation</h3>
-  <div class="mute">{% if human_handled %}Handled by a person: the bot sends only a holding reply.{% else %}The bot is answering this lead.{% endif %}</div>
+  <div class="mute">{% if human_handled %}Handled by a person: the bot sends only a holding reply until you or staff reply, then stays silent.{% else %}The bot is answering this lead.{% endif %}</div>
   <div class="msgs">
   {% for m in lead.messages %}
     <div class="msg {{ 'in' if m.direction == 'inbound' else 'out' }}{{ ' failed' if m.status == 'failed' }}" id="m{{ m.id }}">

@@ -308,3 +308,20 @@ def test_phone_numbers_are_tap_to_chat_links_on_the_lead_page_and_list(app, sent
     for url in (f"/leads/{lead.id}", "/leads"):
         html = c.get(url).get_data(as_text=True)
         assert 'href="https://wa.me/2348011111111"' in html and "+234 801-111 1111" in html, url
+
+
+def test_owner_alert_and_lead_page_show_the_prospect_number(app, sent, claude):
+    claude["intent"] = "exploring"
+    lead = make_waiting(app, sent, claude)
+    lead.phone = "2348011111111"
+    db.session.commit()
+    assert service.send_owner_alert(lead, "Amaka needs a person: wants a call.")
+    text = alerts(sent)[0][2] if alerts(sent)[0][0] == "text" else alerts(sent)[0][3][0]
+    assert "Phone: +2348011111111." in text and text.index("Phone:") < text.index('Reply "done')
+    c = app.test_client()
+    c.post("/login", data={"password": "pw", "csrf": ""})
+    with c.session_transaction() as s:
+        s["auth"], s["csrf"] = True, "tok"
+    html = c.get(f"/leads/{lead.id}").get_data(as_text=True)
+    top = html.split("Conversation")[0]  # the number sits in the top card, above the conversation
+    assert "+2348011111111" in top and "https://wa.me/2348011111111" in top

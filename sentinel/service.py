@@ -425,7 +425,9 @@ def send_owner_alert(lead, line):
         who = lead.referrer_name or ""
         who += (f" ({lead.referrer_phone})" if who else lead.referrer_phone) if lead.referrer_phone else ""
         ref = " [Referred by " + templates_meta.clean_param(who, 80) + "]"
-    line = templates_meta.clean_param(line, 400 - len(suffix) - len(ref)) + ref + suffix
+    digits = re.sub(r"\D", "", lead.phone or "")
+    ph = f" Phone: +{digits}." if digits else ""  # WhatsApp makes it tappable; the lead page links to the chat too
+    line = templates_meta.clean_param(line, 400 - len(suffix) - len(ref) - len(ph)) + ref + ph + suffix
     delivered = _alert_whatsapp(lead, line, url)
     mailed = emailer.send_alert(f"Mega-Net lead: {lead.display_name}", f"{line}\n{url}")
     delivered = bool(delivered or mailed)
