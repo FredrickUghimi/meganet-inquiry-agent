@@ -7,7 +7,7 @@ from flask import current_app
 from sqlalchemy import func
 
 from . import ai, emailer, knowledge, menu, templates_meta, whatsapp
-from . import business_facts, demo
+from . import business_facts, demo, knowledge_base
 from .models import DemoRequest, Lead, Message, OpenQuestion, OptOut, db, utcnow
 
 log = logging.getLogger(__name__)
@@ -835,7 +835,8 @@ def _pencil(lead, d, start):
 def sanitize_links(text):
     """Only the stored demo video links and the official WhatsApp link may appear in a reply, character for character. Any
     other link Claude wrote (or a rewritten or shortened copy of one) is removed."""
-    approved = set(business_facts.PRODUCT_DEMO_VIDEOS.values()) | {business_facts.OFFICIAL_WHATSAPP_LINK}
+    approved = (set(business_facts.PRODUCT_DEMO_VIDEOS.values()) | {business_facts.OFFICIAL_WHATSAPP_LINK}
+                | set(knowledge_base.COMMUNITY_LINKS))
 
     def keep(m):
         url = m.group(0)
@@ -1482,8 +1483,8 @@ def _reply_pipeline(lead_id, retry, dry_run, say):
         if changed:
             db.session.commit()
     hint = ai.heuristic_intent(latest)
-    if topic == "academy":
-        hint = None  # Academy fees and dates are the Academy team's, not a Mega-Net software pricing lead
+    if topic in ("academy", "community"):
+        hint = None  # Community membership is free; Academy fees and dates are the Academy team's, not a Mega-Net software pricing lead
     if hint and result["intent"] == "exploring":
         say(f"keyword safety net: latest message asks about {'pricing' if hint == 'ready_pricing' else 'a demo'}; "
             f"upgrading intent exploring -> {hint}")
