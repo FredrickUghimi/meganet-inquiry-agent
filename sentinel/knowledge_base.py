@@ -2,20 +2,20 @@
 
   CORE        always in the prompt: the company, one line on every product, and the answers to the retired names.
               Together with the internal rules (business_facts.internal_block) it stays under CORE_TOKEN_BUDGET.
-  SECTIONS    loaded only when the classifier detects the topic (ai.TOPICS): other products, Academy, software
+  SECTIONS    loaded only when the classifier detects the topic (ai.TOPICS): other products, Academy, Community, software
               development, partnership. Each stays under SECTION_TOKEN_BUDGET.
 
 Everything here is customer-facing: Claude may paraphrase it. Internal rules (never quoted) live in business_facts.py.
 Operational facts (demo schedule, pricing policy, implementation, support hours, complaint promise, business hours) live
 ONLY in business_facts.py and are deliberately not repeated here: tests/test_knowledge_base.py fails if they are.
 EHR Cloud and ERP Cloud detail lives ONLY in knowledge.py (the verified notes); the lines below are one-line summaries that
-must agree with them. No phone numbers, e-mail addresses or website links appear in this file.
+must agree with them. Only the COMMUNITY section carries links and an e-mail address (the owner-approved community ones).
 
 This is guidance, not a script. Claude writes every reply in its own words.
 """
 
-CORE_TOKEN_BUDGET = 1550  # was 1500; the Project Management wording needs about 45 tokens
-SECTION_TOKEN_BUDGET = 1000
+CORE_TOKEN_BUDGET = 1600  # was 1500, then 1550; the Project Management wording needs about 45 tokens, the Community line about 25
+SECTION_TOKEN_BUDGET = 1100  # was 1000; the Community section (three links, rules, trainers) needs about 1050
 
 
 def estimate_tokens(text):
@@ -53,6 +53,7 @@ single space (no multiple branches), and Business Sentinel runs five rule-based 
 - Mega-Net ERP (Desktop/Legacy ERP): installed accounting, inventory, sales, HR/payroll and reporting.
 - BuildBuddy: {BUILDBUDDY}
 - Mega-Net Academy: software engineering, data and AI training.
+- Mega-Net Software Community: a free WhatsApp community for learners, developers and technology enthusiasts.
 - Software development services: custom projects, assessed by the technical team.
 
 Business Sentinel is built into Mega-Net ERP Cloud and is not sold separately. If asked about BizLens, answer along \
@@ -111,6 +112,54 @@ automatically. Not known to you: the schedule, locations, training fees, payment
 state, estimate or hint at any of them, never promise a place, and never say anyone has been accepted. This call is for \
 trainers and mentors only; it is not a course a learner can enrol in."""
 
+# The only links the bot may ever share about the community, exactly as the owner wrote them (service.sanitize_links
+# removes any other link from a reply). The third is the official WhatsApp contact, business_facts.OFFICIAL_WHATSAPP_LINK.
+COMMUNITY_JOIN_LINK = "https://chat.whatsapp.com/Fha3qMAJrzT74m6SgWrEPV"
+COMMUNITY_CHANNEL_LINK = "https://whatsapp.com/channel/0029VaY7mSrGU3BLJH5wNl1Z"
+COMMUNITY_CONTACT_LINK = "https://wa.me/2347076000030"
+COMMUNITY_EMAIL = "info@meganetsoftware.com.ng"
+COMMUNITY_LINKS = (COMMUNITY_JOIN_LINK, COMMUNITY_CHANNEL_LINK, COMMUNITY_CONTACT_LINK)
+
+COMMUNITY = f"""\
+The Mega-Net Software Community is the home of learners, developers, entrepreneurs and technology enthusiasts connected to \
+Mega-Net Software. Members share practical knowledge, learning opportunities, programming tips, AI and Data Analytics \
+resources, digital product opportunities, technology updates and announcements from Mega-Net. Our goal is simple: learn, \
+build, share and grow together. Whether you are just starting your journey in technology or already building software and \
+digital products, you are welcome. Taglines: Learn. Build. Grow with Mega-Net. / Practical Software Engineering, Data & AI Training.
+Membership is free.
+Official links (share only these, exactly as written, never create, guess or modify any other link):
+- Join the WhatsApp Community: {COMMUNITY_JOIN_LINK}
+- Community WhatsApp Channel (announcements and updates): {COMMUNITY_CHANNEL_LINK}
+- Mega-Net WhatsApp contact for enquiries: {COMMUNITY_CONTACT_LINK} (a contact link, not a community invitation link)
+Joining: anyone can join free using the Community link. Share it when someone asks to join or shows interest; joining needs \
+no vetting. Share the channel link for updates.
+Posting is different: members must be vetted by the Mega-Net team before they can post in the community. This protects \
+members from spam, repeated posts and fraudulent information. Never promise posting rights, approval or a timeline, never \
+approve or reject anyone, and state no vetting criteria beyond this. When someone asks about posting or wants to share \
+something: explain that vetting is required, ask for their name, location, background, interests and what they want to \
+share or why they want to post, say the team will review it; the owner is alerted automatically.
+Quizzes and coding exercises are planned but have NOT started. Never say they are running, give dates or invent any. If \
+asked, say the community plans to introduce them and announcements will be made in the community and channel.
+Member Introductions group: members introduce themselves and share professional backgrounds, skills, businesses and \
+interests. Posting there is restricted to group administrators. Members send their introduction to the Community \
+Administrator, Fredrick Ughimi, for review and publication, via the official WhatsApp contact ({COMMUNITY_CONTACT_LINK}). \
+Unsolicited posts, advertisements, spam and unrelated content are not published. If someone wants to introduce themselves, \
+ask for name, location, professional background, skills, business (if any) and interests, say it will be passed on for \
+review; the owner is alerted automatically. Never promise it will be published or when.
+Rules: spam, repeated posting of the same message, unsolicited advertisements, fraudulent messages and unrelated content \
+are not permitted. Posting requires prior vetting. Official announcements are published in the Announcements group. Never \
+promise unrestricted posting rights; never invent other rules, penalties or policies.
+Trainers and mentors: Mega-Net Software has issued a public call for Trainers and Mentors in the community. It welcomes \
+experienced professionals, software developers, data professionals, AI and ML practitioners with practical experience, and \
+passionate educators. Areas: Python Programming, Artificial Intelligence, Data Analytics, Machine Learning. The aim is \
+practical, hands-on learning, mentoring learners and sharing industry insight. Interested people can reach out on the \
+official WhatsApp contact ({COMMUNITY_CONTACT_LINK}) or by email at {COMMUNITY_EMAIL} (the only e-mail address you may give), \
+with a brief introduction, area of expertise and relevant experience; they may also recommend someone who would be a good \
+fit. Handle these as in the Mega-Net Academy trainer and mentor call: ask for name, strongest area, experience, train or \
+mentor, online or offline; the owner is alerted automatically. State no pay, schedule or acceptance.
+Anything not written here (events, member numbers, benefits, prices, policies): say the team will confirm. Never invent any. \
+Stay welcoming, professional and concise."""
+
 DEV_SERVICES = """\
 Mega-Net Software also undertakes software development and technology projects. Possible areas: custom business \
 applications, enterprise software development, database design and management, business process automation, AI and machine \
@@ -128,6 +177,7 @@ terms described to you: the team handles them."""
 SECTIONS = {
     "other_product": ("Other Mega-Net applications", OTHER_PRODUCTS),
     "academy": ("Mega-Net Academy", ACADEMY),
+    "community": ("Mega-Net Software Community", COMMUNITY),
     "dev_services": ("Software development services", DEV_SERVICES),
     "partnership": ("Partnerships", PARTNERSHIP),
 }

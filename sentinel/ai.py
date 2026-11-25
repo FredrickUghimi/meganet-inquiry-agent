@@ -95,7 +95,7 @@ PRODUCT_KNOWLEDGE = {
 }
 
 
-TOPICS = ("ehr", "erp", "other_product", "academy", "dev_services", "partnership", "general")
+TOPICS = ("ehr", "erp", "other_product", "academy", "community", "dev_services", "partnership", "general")
 # Topics that bring their own section and so do not need a product's detailed notes in the prompt.
 SECTION_TOPICS = tuple(knowledge_base.SECTIONS)
 
@@ -181,7 +181,7 @@ CLASSIFY_INSTRUCTIONS = (
     '"product": "ehr_cloud|erp_cloud|unsure", "name": "<lead\'s name or null>", "summary": "<one line>", '
     '"flag": "none|complaint|custom_request|unanswered", "question": "<the lead\'s question or null>", '
     '"existing_client": true|false, "client_topic": "support|sales|null", '
-    '"topic": "ehr|erp|other_product|academy|dev_services|partnership|general", "other_product": "<name or null>", '
+    '"topic": "ehr|erp|other_product|academy|community|dev_services|partnership|general", "other_product": "<name or null>", '
     '"referrer_name": "<name or null>", "referrer_phone": "<number or null>", '
     '"contact_preference": "none|opt_out|restart|not_interested"}\n'
     "intent: exploring = still learning or undecided; ready_demo = asks for or agrees to a demo/call/meeting; "
@@ -202,6 +202,7 @@ CLASSIFY_INSTRUCTIONS = (
     "Mega-Net ERP Cloud (including Business Sentinel and BizLens, its former name); other_product = any other Mega-Net "
     "application (HospitalPro, Revenue Guard, PharmacyPro, Clinic Appointment System, ChurchPro, SchoolPro, GuestsPro, "
     "the desktop Mega-Net ERP, BuildBuddy) and then other_product is its name; academy = Mega-Net Academy training, mentorship, or someone asking about becoming a trainer or mentor; "
+    "community = the Mega-Net Software Community (the WhatsApp community and channel, joining it, posting in it, member introductions, quizzes and exercises) unless the person is offering to be a trainer or mentor, which is academy; "
     "dev_services = having custom software built; partnership = a business partnership, reselling or collaboration; "
     "general = anything else (greetings, demo, pricing, thanks, what is Mega-Net Software). other_product is null "
     "unless topic is other_product. referrer_name / referrer_phone: only when the lead says someone referred or sent them "
@@ -284,6 +285,17 @@ def heuristic_intent(text):
     return None
 
 
+COMMUNITY_RE = re.compile(r"\b(community|vetting|vetted|member introductions?|introduce (?:myself|ourselves)|self[- ]introduction|"
+                          r"quiz(?:zes)?|coding exercises?|whatsapp (?:group|channel)|"
+                          r"(?:join|joining|enter) (?:the |your |this |a )?(?:group|channel))\b", re.I)
+COMMUNITY_POST_RE = re.compile(r"\b(?:(?:post|posting|share|sharing|advertis\w+|promot\w+)(?: \w+){0,4} "
+                               r"(?:in|on|to|with) (?:the |your |this )?(?:community|group|channel)|"
+                               r"(?:can|could|may|how (?:do|can|could)) (?:i|we) (?:post|share|advertis\w+)|"
+                               r"vett(?:ing|ed)|posting rights|(?:allowed|able|permitted) to post|want(?:ed)? to post)\b", re.I)
+COMMUNITY_INTRO_RE = re.compile(r"\b(?:introduce (?:myself|ourselves)|(?:my|our) (?:self[- ]?)?introduction|"
+                                r"(?:send|submit|share|publish)\w* (?:my|an?) introduction|member introductions?)\b", re.I)
+
+
 _TOPIC_HINTS = (  # keyword safety net for the classifier's topic, first match wins
     ("other_product", re.compile(r"\b(hospital ?pro|revenue ?guard|pharmacy ?pro|clinic appointment(?: system)?|church ?pro|"
                                  r"school ?pro|guests? ?pro|build ?buddy|desktop erp|legacy erp)\b", re.I)),
@@ -291,6 +303,7 @@ _TOPIC_HINTS = (  # keyword safety net for the classifier's topic, first match w
                            r"(?:trainers?|mentors?|instructors?|facilitators?)|"
                            r"(?:training|mentorship) (?:programmes?|programs?|sessions?|classes)|"
                            r"learn (?:python|programming|coding|data|ai))\b", re.I)),
+    ("community", COMMUNITY_RE),
     ("dev_services", re.compile(r"\b(custom (?:software|app|application|system|development)|software development|"
                                 r"(?:build|develop|create) (?:me |us )?(?:an? |the )?(?:\w+ )?(?:app|software|system|application|website))\b",
                                 re.I)),
@@ -326,6 +339,8 @@ def resolve_topic(result, latest):
     if topic not in TOPICS or topic == "general":
         hint = topic_hint(latest)
         return hint if hint else ("general", None)
+    if topic == "community" and TRAINER_APPLY_RE.search(latest or ""):
+        return "academy", None  # trainer and mentor offers always follow the Academy flow
     return topic, name
 
 
@@ -348,6 +363,13 @@ def topic_flag(topic, latest):
         return "unanswered", "Academy trainer/mentor"
     if topic == "academy" and ACADEMY_ADMIN_RE.search(latest or ""):
         return "unanswered", "Academy"
+    if topic == "community":
+        if TRAINER_APPLY_RE.search(latest or ""):  # trainers and mentors keep the Academy flow
+            return "unanswered", "Academy trainer/mentor"
+        if COMMUNITY_INTRO_RE.search(latest or ""):
+            return "unanswered", "Community introduction"
+        if COMMUNITY_POST_RE.search(latest or ""):
+            return "unanswered", "Community posting vetting"
     if topic == "dev_services":
         return "custom_request", "Software development"
     if topic == "partnership":
@@ -532,7 +554,7 @@ REPLY_RULES = (
     "AI, answer honestly that you are an AI assistant and that a member of the team follows up personally. Introduce "
     "yourself as the AI assistant only once, in the first message of the conversation, and never again.\n"
     "- Custom software requests are never promised: say the team assesses them. For Academy fees, dates and enrolment say "
-    "the team will confirm; the same for anyone offering to be a trainer or mentor (never state pay, schedule or acceptance). Give no e-mail address or website. When asked how to contact the company, for a number, to "
+    "the team will confirm; the same for anyone offering to be a trainer or mentor (never state pay, schedule or acceptance). Give no e-mail address or website, except the trainer and mentor contact in the Community knowledge. When asked how to contact the company, for a number, to "
     "message a person or for a partner contact, give the official WhatsApp number and link from the business facts, exactly, "
     "and no other number: never Fredrick's or the owner's.\n"
     "- If they ask to talk to a person, hand over warmly: say Fredrick or a member of the team will take over and reply "
@@ -1324,7 +1346,7 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             problems.append(("phone", "Your last attempt contained a phone number that is not the official WhatsApp number. "
                                       "Remove every other number. Give only the official WhatsApp number from the business "
                                       "facts, and only if the customer asked how to contact the company."))
-        if _CONTACT_RE.search(text):
+        if _CONTACT_RE.search(text.replace(knowledge_base.COMMUNITY_EMAIL, "")):  # the trainer and mentor e-mail is approved
             problems.append(("contact", "Your last attempt gave a website or e-mail address. Give no contact details."))
         last = _last_bot_text(messages)
         if _COMPANY_INTRO_RE.search(text) and last and _COMPANY_INTRO_RE.search(last):

@@ -14,11 +14,12 @@ INTRO = "Hello Amaka! I'm Mega-Net Lead Sentinel, Mega-Net's AI assistant."
 CORE_MARK = "BuildBuddy: Get senior-level coding guidance"
 OTHER_MARK = "Other Mega-Net applications"
 ACADEMY_MARK = "Mega-Net Academy provides practical technology education"
+COMMUNITY_MARK = "The Mega-Net Software Community is the home of learners"
 DEV_MARK = "Mega-Net Software also undertakes software development"
 PARTNER_MARK = "Partnership and referral enquiries"
 EHR_MARK = "EHR Cloud knowledge:"
 ERP_MARK = "ERP Cloud knowledge:"
-SECTION_MARKS = (OTHER_MARK, ACADEMY_MARK, DEV_MARK, PARTNER_MARK)
+SECTION_MARKS = (OTHER_MARK, ACADEMY_MARK, COMMUNITY_MARK, DEV_MARK, PARTNER_MARK)
 
 
 def system_of(call):
@@ -45,7 +46,7 @@ def customer_visible_texts():
 
 # --- tiered loading --------------------------------------------------------------------------------------------------
 
-def test_core_and_internal_rules_stay_under_1550_tokens_and_each_section_under_1000():
+def test_core_and_internal_rules_stay_under_1600_tokens_and_each_section_under_1000():
     core = knowledge_base.estimate_tokens(knowledge_base.CORE + business_facts.internal_block())
     assert core < knowledge_base.CORE_TOKEN_BUDGET, core
     for topic, (_, text) in knowledge_base.SECTIONS.items():
@@ -71,7 +72,7 @@ def test_buildbuddy_is_exactly_the_approved_sentence_and_nothing_longer_exists()
 def test_which_knowledge_loads_for_each_topic(app):
     lead = Lead(product_interest="ehr_cloud")
     for topic, present in [(None, (EHR_MARK,)), ("general", (EHR_MARK,)), ("ehr", (EHR_MARK,)), ("erp", (ERP_MARK,)),
-                           ("other_product", (OTHER_MARK,)), ("academy", (ACADEMY_MARK,)), ("dev_services", (DEV_MARK,)),
+                           ("other_product", (OTHER_MARK,)), ("academy", (ACADEMY_MARK,)), ("community", (COMMUNITY_MARK,)), ("dev_services", (DEV_MARK,)),
                            ("partnership", (PARTNER_MARK,))]:
         system = ai.system_text(ai._system(lead, "x", topic))
         only(system, *present)
@@ -411,7 +412,9 @@ LINK = re.compile(r"https?://|www\.|\b[\w-]+\.(?:com|ng|org|net|io|co|ng)\b|\b\w
 
 def without_official(text):
     """The official WhatsApp number and link are the only contact details allowed in customer-visible text."""
-    return text.replace(business_facts.OFFICIAL_WHATSAPP_NUMBER, "").replace(business_facts.OFFICIAL_WHATSAPP_LINK, "")
+    for approved in (business_facts.OFFICIAL_WHATSAPP_NUMBER, *knowledge_base.COMMUNITY_LINKS, knowledge_base.COMMUNITY_EMAIL):
+        text = text.replace(approved, "")  # the three community links and the trainer e-mail are owner-approved too
+    return text
 
 
 def test_no_phone_number_email_or_link_in_any_customer_visible_text_or_prompt(app):
@@ -422,7 +425,7 @@ def test_no_phone_number_email_or_link_in_any_customer_visible_text_or_prompt(ap
             text = without_official(ai.system_text(ai._system(Lead(product_interest=product), "x", topic)))
             assert not PHONE.search(text) and not LINK.search(text), (product, topic)
     assert not PHONE.search(without_official(knowledge.first_reply_brief("ehr_cloud", "A"))) and "youtu" not in knowledge.first_reply_brief("erp_cloud")
-    assert "meganetsoftware" not in (ROOT / "sentinel" / "knowledge_base.py").read_text().lower().replace("meganetsoftware|", "")
+    assert "meganetsoftware" not in (ROOT / "sentinel" / "knowledge_base.py").read_text().lower().replace("meganetsoftware|", "").replace(knowledge_base.COMMUNITY_EMAIL, "")
 
 
 def test_a_reply_giving_the_company_website_is_regenerated(chat, cl):
@@ -637,3 +640,114 @@ def test_inventory_costing_questions_do_not_trigger_the_project_management_alert
     assert ai.topic_flag("erp", "How does weighted-average costing work for stock?") == (None, None)
     assert ai.topic_flag("erp", "Can I track tasks and milestones?") == (None, None)
     assert ai.topic_flag("erp", "Does it support task dependencies?") == ("unanswered", "Project Management")
+
+
+# --- Mega-Net Software Community -------------------------------------------------------------------------------------
+
+JOIN = "https://chat.whatsapp.com/Fha3qMAJrzT74m6SgWrEPV"
+CHANNEL = "https://whatsapp.com/channel/0029VaY7mSrGU3BLJH5wNl1Z"
+CONTACT = "https://wa.me/2347076000030"
+URL_RE = re.compile(r"https?://\S+")
+
+
+def test_the_community_links_are_exactly_the_three_approved_ones():
+    assert knowledge_base.COMMUNITY_LINKS == (JOIN, CHANNEL, CONTACT)
+    assert {u.rstrip(").,") for u in URL_RE.findall(knowledge_base.COMMUNITY)} == {JOIN, CHANNEL, CONTACT}
+    assert CONTACT == business_facts.OFFICIAL_WHATSAPP_LINK
+
+
+def test_community_questions_load_the_community_section_and_trainer_offers_load_the_academy(chat, cl):
+    for text in ("How do I join the community?", "Do you have quizzes?", "I want to introduce myself",
+                 "Can I post in the group? What is the vetting?", "Is there a WhatsApp channel?"):
+        hint = ai.topic_hint(text)
+        assert hint and hint[0] == "community", text
+    assert ai.topic_hint("I want to be a trainer in the community")[0] == "academy"
+    assert ai.resolve_topic({"topic": "community"}, "I want to join the community as a mentor")[0] == "academy"
+    assert ai.resolve_topic({"topic": "community"}, "How do I join?")[0] == "community"
+
+
+def test_bot_shares_the_join_link_and_says_membership_is_free(chat, cl):
+    cl.classification.update(product="unsure", topic="community")
+    r = chat.say("How do I join the Mega-Net community? Is it paid?",
+                 turn(f"Membership is free. Join the WhatsApp Community here: {JOIN}"))
+    system = system_of(cl.calls[0])
+    only(system, COMMUNITY_MARK)
+    assert "Membership is free." in system and f"Join the WhatsApp Community: {JOIN}" in system
+    assert "joining needs no vetting" in system
+    assert JOIN in r[0] and "free" in r[0]
+    assert OpenQuestion.query.count() == 0 and chat.owner_texts() == []
+
+
+def test_posting_needs_vetting_with_no_approval_or_timeline_and_the_owner_is_alerted(chat, cl):
+    cl.classification.update(product="unsure", topic="community")
+    r = chat.say("I want to post my product in the community",
+                 turn("Posting needs vetting by the team first. Please share your name, location, background, interests "
+                      "and what you want to post. The team will review it."))
+    system = system_of(cl.calls[0])
+    assert "members must be vetted by the Mega-Net team before they can post" in system
+    assert "Never promise posting rights, approval or a timeline" in system and "never approve or reject anyone" in system
+    q = OpenQuestion.query.one()
+    assert q.kind == "unanswered" and q.question.startswith("[Community posting vetting]")
+    assert chat.owner_texts()
+    assert not re.search(r"\b(approved|within|days?|hours?|guarantee)", r[0], re.I)
+
+
+def test_introductions_collect_details_and_alert_the_owner_without_a_publication_promise(chat, cl):
+    cl.classification.update(product="unsure", topic="community")
+    chat.say("I would like to introduce myself to the community",
+             turn("Please share your name, location, professional background, skills, business and interests; it will be passed on for review."))
+    system = system_of(cl.calls[0])
+    assert "Never promise it will be published or when" in system and "restricted to group administrators" in system
+    assert OpenQuestion.query.one().question.startswith("[Community introduction]")
+
+
+def test_quizzes_and_exercises_are_planned_but_not_started(chat, cl):
+    cl.classification.update(product="unsure", topic="community")
+    chat.say("When is the next quiz?", turn("Quizzes and coding exercises are planned but have not started; announcements will come in the community and channel."))
+    system = system_of(cl.calls[0])
+    assert "planned but have NOT started" in system and "Never say they are running, give dates or invent any" in system
+    assert OpenQuestion.query.count() == 0
+
+
+def test_community_trainer_offers_keep_the_academy_flow_and_state_no_pay(chat, cl):
+    cl.classification.update(product="unsure", topic="community")
+    chat.say("I want to join the community as a mentor in data analytics",
+             turn("Thank you! What is your name, strongest area and experience?"))
+    system = system_of(cl.calls[0])
+    only(system, ACADEMY_MARK)
+    assert "Call for trainers and mentors" in system and "never state, estimate or hint at any amount" in system
+    assert OpenQuestion.query.one().question.startswith("[Academy trainer/mentor]")
+    community = knowledge_base.COMMUNITY.lower()
+    assert "state no pay, schedule or acceptance" in community
+    assert not re.search(r"\d\s?%|per hour|per session|\u20a6|naira|\bngn\b", community)
+
+
+def test_links_beyond_the_three_are_removed_from_replies(app):
+    text = (f"Join: {JOIN} Channel: {CHANNEL} Contact: {CONTACT} Other: https://chat.whatsapp.com/INVENTED123 "
+            "Site: https://meganetsoftware.com.ng")
+    out = service.sanitize_links(text)
+    for url in (JOIN, CHANNEL, CONTACT):
+        assert url in out
+    assert "INVENTED123" not in out and "meganetsoftware.com.ng" not in out
+
+
+def test_community_alert_topics_do_not_flag_plain_questions():
+    assert ai.topic_flag("community", "How do I join the community?") == (None, None)
+    assert ai.topic_flag("community", "When will the quizzes start?") == (None, None)
+    assert ai.topic_flag("community", "Can I post in the group?") == ("unanswered", "Community posting vetting")
+    assert ai.topic_flag("community", "I want to introduce myself") == ("unanswered", "Community introduction")
+    assert ai.topic_flag("community", "I can mentor in the community") == ("unanswered", "Academy trainer/mentor")
+
+
+def test_the_community_links_and_email_appear_in_no_other_section_or_text():
+    for name, text in customer_visible_texts().items():
+        if name != "section community":
+            for approved in (knowledge_base.COMMUNITY_JOIN_LINK, knowledge_base.COMMUNITY_CHANNEL_LINK, knowledge_base.COMMUNITY_EMAIL):
+                assert approved not in text, name
+
+
+def test_the_approved_trainer_email_is_allowed_in_a_reply_but_the_website_is_not(chat, cl):
+    cl.classification.update(product="unsure", topic="academy")
+    r = chat.say("Where do I send my details for the trainer call?",
+                 turn(f"Email a short introduction to {knowledge_base.COMMUNITY_EMAIL} or message {CONTACT}."))
+    assert knowledge_base.COMMUNITY_EMAIL in r[0] and len(cl.calls) == 1
