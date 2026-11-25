@@ -678,18 +678,40 @@ def test_bot_shares_the_join_link_and_says_membership_is_free(chat, cl):
     assert OpenQuestion.query.count() == 0 and chat.owner_texts() == []
 
 
-def test_posting_needs_vetting_with_no_approval_or_timeline_and_the_owner_is_alerted(chat, cl):
+def test_a_new_member_asking_to_post_gets_vetting_with_no_approval_or_timeline_and_the_owner_is_alerted(chat, cl):
     cl.classification.update(product="unsure", topic="community")
-    r = chat.say("I want to post my product in the community",
-                 turn("Posting needs vetting by the team first. Please share your name, location, background, interests "
+    r = chat.say("I am new and I want to post my product in the community",
+                 turn("New members are vetted by the team first. Please share your name, location, background, interests "
                       "and what you want to post. The team will review it."))
     system = system_of(cl.calls[0])
-    assert "members must be vetted by the Mega-Net team before they can post" in system
-    assert "Never promise posting rights, approval or a timeline" in system and "never approve or reject anyone" in system
+    assert "New members must be vetted by the Mega-Net team before they can post" in system
+    assert "Do not promise posting rights, approval or a timeline" in system and "Do not approve or reject anyone yourself" in system
     q = OpenQuestion.query.one()
     assert q.kind == "unanswered" and q.question.startswith("[Community posting vetting]")
     assert chat.owner_texts()
     assert not re.search(r"\b(approved|within|days?|hours?|guarantee)", r[0], re.I)
+
+
+def test_an_existing_member_can_post_without_vetting_but_must_follow_guidelines_and_the_team_is_alerted(chat, cl):
+    cl.classification.update(product="unsure", topic="community")
+    r = chat.say("I am an existing member of the community, can I post?",
+                 turn("Existing members can post, but all members must follow the community guidelines. The team will confirm."))
+    system = system_of(cl.calls[0])
+    assert "Existing members, whom the team already knows, can post without vetting" in system
+    assert "All members, new or existing, must follow the community guidelines" in system
+    assert "ask whether they are already a member of the community" in system
+    assert "since you cannot verify membership" in system
+    assert OpenQuestion.query.one().question.startswith("[Community posting vetting]")
+    assert chat.owner_texts()
+    assert not re.search(r"\b(verified|confirmed you are|i can see you)\b", r[0], re.I)
+
+
+def test_community_text_never_says_all_members_need_vetting_or_that_membership_is_verified():
+    text = knowledge_base.COMMUNITY
+    assert "Posting requires prior vetting" not in text and "members must be vetted by the Mega-Net team before they can post in" not in text
+    assert "Never claim to have verified anyone's membership" in text
+    assert "New members must be vetted before posting. All members must follow the guidelines." in text
+    assert "vetting" not in knowledge_base.CORE.lower()
 
 
 def test_introductions_collect_details_and_alert_the_owner_without_a_publication_promise(chat, cl):
