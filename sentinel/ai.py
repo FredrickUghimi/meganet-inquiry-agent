@@ -554,7 +554,7 @@ REPLY_RULES = (
     "AI, answer honestly that you are an AI assistant and that a member of the team follows up personally. Introduce "
     "yourself as the AI assistant only once, in the first message of the conversation, and never again.\n"
     "- Custom software requests are never promised: say the team assesses them. For Academy fees, dates and enrolment say "
-    "the team will confirm; the same for anyone offering to be a trainer or mentor (never state pay, schedule or acceptance). Give no e-mail address or website, except the trainer and mentor contact in the Community knowledge. When asked how to contact the company, for a number, to "
+    "the team will confirm; the same for anyone offering to be a trainer or mentor (never state pay, schedule or acceptance). Give no e-mail address, except the trainer and mentor contact in the Community knowledge. When asked for the website, or when it helps (for example \"do you have a website?\", \"where can I see your products?\"), give the company website from the business facts exactly, never a page or path on it, and still offer the official WhatsApp contact for anything else; reply in the person's language, warm and brief. When asked how to contact the company, for a number, to "
     "message a person or for a partner contact, give the official WhatsApp number and link from the business facts, exactly, "
     "and no other number: never Fredrick's or the owner's.\n"
     "- If they ask to talk to a person, hand over warmly: say Fredrick or a member of the team will take over and reply "
@@ -814,7 +814,15 @@ _HUMAN_CLAIM_RE = re.compile(
     r"\byou(?:'re|\u2019re|\s+are)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:a\s+)?(?:real\s+)?(?:human|person)\b", re.I)
 _SAYS_AI_RE = re.compile(r"\bAI\b|artificial intelligence|\bbot\b|automated assistant", re.I)
 _SAYS_TEAM_RE = re.compile(r"\b(team|Fredrick|colleague|someone|member of)\b", re.I)
-_CONTACT_RE = re.compile(r"meganetsoftware|\.com\.ng\b", re.I)  # the company's own site or e-mail domain is never given out
+_CONTACT_RE = re.compile(r"meganetsoftware|\.com\.ng\b", re.I)  # the company's own domain: only the approved site and e-mail pass
+
+
+def without_approved_contacts(text):
+    """`text` with the two approved company contacts removed: the e-mail (trainer and mentor enquiries) and the website
+    exactly as written (the root only: a path, port, other sub-domain or longer domain after it is not approved)."""
+    site = re.escape(business_facts.COMPANY_WEBSITE) + r"(?![\w/:@-]|\.\w)"
+    mail = re.escape(knowledge_base.COMMUNITY_EMAIL) + r"(?![\w-]|\.\w)"
+    return re.sub(site, "", re.sub(mail, "", text or "", flags=re.I), flags=re.I)
 # --- the referral partnership programme: what a draft may and may not say --------------------------------------------------
 # A statement that matches a filled-in constant in business_facts.py is allowed; one that does not, or that touches a TODO fact, is
 # regenerated. Sentences that hand the point to the team / the written policy are never claims.
@@ -1346,8 +1354,8 @@ def draft_turn(lead, messages, situation, context="", fallback_text=None, struct
             problems.append(("phone", "Your last attempt contained a phone number that is not the official WhatsApp number. "
                                       "Remove every other number. Give only the official WhatsApp number from the business "
                                       "facts, and only if the customer asked how to contact the company."))
-        if _CONTACT_RE.search(text.replace(knowledge_base.COMMUNITY_EMAIL, "")):  # the trainer and mentor e-mail is approved
-            problems.append(("contact", "Your last attempt gave a website or e-mail address. Give no contact details."))
+        if _CONTACT_RE.search(without_approved_contacts(text)):  # the approved website and trainer e-mail pass
+            problems.append(("contact", "Your last attempt gave an e-mail address, a website or a link that is not approved. Give only the company website from the business facts, exactly as written, and the official WhatsApp contact."))
         last = _last_bot_text(messages)
         if _COMPANY_INTRO_RE.search(text) and last and _COMPANY_INTRO_RE.search(last):
             problems.append(("company_intro", "You introduced the company in your last message. Do not introduce it again; "

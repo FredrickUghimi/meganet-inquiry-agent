@@ -262,7 +262,8 @@ def check_reply(reply, scenario, prior_bot_texts):
     checks.append(("AI disclosure once, never repeated",
                    intros == (0 if any(re.search(knowledge.AI_INTRO_RE, t) for t in prior_bot_texts) else 1),
                    f"{intros} introduction(s)"))
-    unofficial = reply.replace(business_facts.OFFICIAL_WHATSAPP_NUMBER, "").replace(business_facts.OFFICIAL_WHATSAPP_LINK, "")
+    unofficial = ai.without_approved_contacts(
+        reply.replace(business_facts.OFFICIAL_WHATSAPP_NUMBER, "").replace(business_facts.OFFICIAL_WHATSAPP_LINK, ""))
     checks.append(("no number, e-mail or website except the official WhatsApp contact",
                    not re.search(r"meganetsoftware|\.com\.ng|\bwww\.|\b0[789]\d{9}\b|\+\d{10,}|wa\.me", unofficial, re.I), ""))
     if first:
