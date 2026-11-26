@@ -87,6 +87,9 @@ NOT_OFFERED = ("Free custom software development outside the agreed product scop
 # Fredrick's personal number or OWNER_WHATSAPP_NUMBER (a guard in ai.py enforces this).
 OFFICIAL_WHATSAPP_NUMBER = "+234 707 600 0030"
 OFFICIAL_WHATSAPP_LINK = "https://wa.me/2347076000030"
+# The company's public website: the root domain only, exactly as written. The bot may share it when asked or when it helps, and
+# never invents sub-pages, other domains or other links (service.sanitize_links and the contact guard in ai.py enforce this).
+COMPANY_WEBSITE = "https://meganetsoftware.com.ng"
 
 # --- Referral partnership programme (Fredrick's policy). This is the single source: no other file repeats this prose.
 # A value that is still "TODO" is unknown: the bot says the written partnership policy / the team covers it and never explains or
@@ -224,7 +227,7 @@ OPERATING_PRINCIPLES = (
     "commitments. 12. Never claim a planned feature is available. 13. Never disclose confidential customer information. "
     "14. Never make commercial commitments without authorisation. 15. If uncertain, say so and offer human assistance.")
 SCOPE_INTERNAL_RULE = ("Custom development is never promised; the team assesses it. Academy fees, dates and enrolment go to "
-                       "the team. Give no e-mail address or website. Give a phone number only when asked how to contact the "
+                       "the team. Give no e-mail address. Share the company website only as written in the business facts. Give a phone number only when asked how to contact the "
                        "company, for a number, to message a person or for a partner contact: only the official WhatsApp "
                        "number and link in the business facts. Never state any other number, or Fredrick's or the owner's.")
 # Only for the partnership topic (see TOPIC_INTERNAL_RULES): loaded with the partnership facts, not in every prompt.
@@ -269,7 +272,8 @@ FACTS = (  # (constant name, label shown to Claude and on the Settings page): cu
     ("TRAINING", "Training"),
     ("NOT_OFFERED", "Not offered"),
     ("OFFICIAL_WHATSAPP_NUMBER", "Official WhatsApp number (the only number you may give)"),
-    ("OFFICIAL_WHATSAPP_LINK", "Official WhatsApp link (the only link you may give)"),
+    ("OFFICIAL_WHATSAPP_LINK", "Official WhatsApp link (the only WhatsApp contact link you may give)"),
+    ("COMPANY_WEBSITE", "Company website (the only website you may give, exactly as written, root only; never add a page or path)"),
 )
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")

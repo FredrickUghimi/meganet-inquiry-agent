@@ -412,8 +412,9 @@ LINK = re.compile(r"https?://|www\.|\b[\w-]+\.(?:com|ng|org|net|io|co|ng)\b|\b\w
 
 def without_official(text):
     """The official WhatsApp number and link are the only contact details allowed in customer-visible text."""
-    for approved in (business_facts.OFFICIAL_WHATSAPP_NUMBER, *knowledge_base.COMMUNITY_LINKS, knowledge_base.COMMUNITY_EMAIL):
-        text = text.replace(approved, "")  # the three community links and the trainer e-mail are owner-approved too
+    for approved in (business_facts.OFFICIAL_WHATSAPP_NUMBER, *knowledge_base.COMMUNITY_LINKS, knowledge_base.COMMUNITY_EMAIL,
+                     business_facts.COMPANY_WEBSITE):
+        text = text.replace(approved, "")  # the community links, the trainer e-mail and the website are owner-approved too
     return text
 
 
@@ -425,13 +426,39 @@ def test_no_phone_number_email_or_link_in_any_customer_visible_text_or_prompt(ap
             text = without_official(ai.system_text(ai._system(Lead(product_interest=product), "x", topic)))
             assert not PHONE.search(text) and not LINK.search(text), (product, topic)
     assert not PHONE.search(without_official(knowledge.first_reply_brief("ehr_cloud", "A"))) and "youtu" not in knowledge.first_reply_brief("erp_cloud")
-    assert "meganetsoftware" not in (ROOT / "sentinel" / "knowledge_base.py").read_text().lower().replace("meganetsoftware|", "").replace(knowledge_base.COMMUNITY_EMAIL, "")
+    assert "meganetsoftware" not in (ROOT / "sentinel" / "knowledge_base.py").read_text().lower().replace("meganetsoftware|", "").replace(knowledge_base.COMMUNITY_EMAIL, "").replace(business_facts.COMPANY_WEBSITE, "")
 
 
-def test_a_reply_giving_the_company_website_is_regenerated(chat, cl):
+SITE = business_facts.COMPANY_WEBSITE
+
+
+def test_asked_for_the_website_the_bot_gives_the_approved_root_site_and_offers_whatsapp(chat, cl):
     cl.classification["product"] = "unsure"
-    r = chat.say("Where can I read more?", turn("Visit meganetsoftware.com.ng for more."), turn("Fredrick or the team will share more details."))
-    assert "meganetsoftware" not in r[0] and len(cl.calls) == 2
+    r = chat.say("Do you have a website? Where can I see your products?",
+                 turn(f"Yes, you can see us at {SITE}. For anything else, message us on WhatsApp: {business_facts.OFFICIAL_WHATSAPP_LINK}"))
+    assert SITE == "https://meganetsoftware.com.ng"
+    assert SITE in r[0] and business_facts.OFFICIAL_WHATSAPP_LINK in r[0] and len(cl.calls) == 1
+    system = system_of(cl.calls[0])
+    assert SITE in system and "Give no e-mail address or website" not in system
+    assert "never a page or path on it" in system
+
+
+def test_a_made_up_sub_page_or_other_domain_in_a_reply_is_regenerated_and_stripped(chat, cl):
+    cl.classification["product"] = "unsure"
+    for bad in (f"See {SITE}/products for details.", f"See {SITE}/ for details.", "See https://meganetsoftware.com/ for details.",
+                "See meganetsoftware.com.ng for details.", "See https://www.example.com for details.",
+                f"See {SITE}.evil.com for details."):
+        assert ai._CONTACT_RE.search(ai.without_approved_contacts(bad)) or "example.com" in bad, bad
+    for ok in (f"See {SITE}", f"See {SITE}.", f"See ({SITE}) now", f"Write to {knowledge_base.COMMUNITY_EMAIL}"):
+        assert not ai._CONTACT_RE.search(ai.without_approved_contacts(ok)), ok
+    r = chat.say("Where can I read more?", turn(f"Visit {SITE}/products for more."), turn(f"Visit {SITE} for more."))
+    assert r[0].count(SITE) == 1 and "/products" not in r[0] and len(cl.calls) == 2
+
+
+def test_sanitize_links_keeps_the_root_site_and_strips_everything_else(app):
+    text = f"Site {SITE} page {SITE}/about other https://www.example.com and https://meganetsoftware.com/x end"
+    out = service.sanitize_links(text)
+    assert SITE in out and "/about" not in out and "example.com" not in out and "meganetsoftware.com/x" not in out
 
 
 # --- the company introduction ---------------------------------------------------------------------------------------------
@@ -744,13 +771,13 @@ def test_community_trainer_offers_keep_the_academy_flow_and_state_no_pay(chat, c
     assert not re.search(r"\d\s?%|per hour|per session|\u20a6|naira|\bngn\b", community)
 
 
-def test_links_beyond_the_three_are_removed_from_replies(app):
+def test_links_beyond_the_approved_ones_are_removed_from_replies(app):
     text = (f"Join: {JOIN} Channel: {CHANNEL} Contact: {CONTACT} Other: https://chat.whatsapp.com/INVENTED123 "
-            "Site: https://meganetsoftware.com.ng")
+            "Site: https://meganetsoftware.com.ng/shop")
     out = service.sanitize_links(text)
     for url in (JOIN, CHANNEL, CONTACT):
         assert url in out
-    assert "INVENTED123" not in out and "meganetsoftware.com.ng" not in out
+    assert "INVENTED123" not in out and "/shop" not in out
 
 
 def test_community_alert_topics_do_not_flag_plain_questions():
@@ -768,8 +795,17 @@ def test_the_community_links_and_email_appear_in_no_other_section_or_text():
                 assert approved not in text, name
 
 
-def test_the_approved_trainer_email_is_allowed_in_a_reply_but_the_website_is_not(chat, cl):
+def test_the_approved_trainer_email_is_allowed_for_trainer_enquiries_but_no_other_email_is_given(chat, cl):
     cl.classification.update(product="unsure", topic="academy")
     r = chat.say("Where do I send my details for the trainer call?",
                  turn(f"Email a short introduction to {knowledge_base.COMMUNITY_EMAIL} or message {CONTACT}."))
     assert knowledge_base.COMMUNITY_EMAIL in r[0] and len(cl.calls) == 1
+
+
+def test_other_email_addresses_are_still_regenerated_and_never_given(chat, cl):
+    cl.classification.update(product="unsure", topic="general")
+    r = chat.say("What is your email?", turn("Write to sales@meganetsoftware.com.ng"), turn(f"Please message us on WhatsApp: {CONTACT}"))
+    assert "sales@" not in r[0] and len(cl.calls) == 2
+    r = chat.say("Any other address?", turn("Try info@meganetsoftware.com.ng.evil.com"), turn(f"Please message us on WhatsApp: {CONTACT}"))
+    assert "@" not in r[0]
+    assert "Give no e-mail address" in ai.system_text(ai._system(Lead(product_interest="unsure"), "x", None))

@@ -833,9 +833,9 @@ def _pencil(lead, d, start):
 
 
 def sanitize_links(text):
-    """Only the stored demo video links and the official WhatsApp link may appear in a reply, character for character. Any
+    """Only the stored demo video links, the official WhatsApp link, the company website (root only) and the community links may appear in a reply, character for character. Any
     other link Claude wrote (or a rewritten or shortened copy of one) is removed."""
-    approved = (set(business_facts.PRODUCT_DEMO_VIDEOS.values()) | {business_facts.OFFICIAL_WHATSAPP_LINK}
+    approved = (set(business_facts.PRODUCT_DEMO_VIDEOS.values()) | {business_facts.OFFICIAL_WHATSAPP_LINK, business_facts.COMPANY_WEBSITE}
                 | set(knowledge_base.COMMUNITY_LINKS))
 
     def keep(m):
